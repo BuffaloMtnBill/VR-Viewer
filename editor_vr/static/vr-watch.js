@@ -1,8 +1,10 @@
 // The left-wrist watch: tap its dial with a fingertip and a pie menu opens in front of you, within reach. Its options
-// depend on the mode: Inspect (the room around the model, Reset view) or Annotate (tools, mark style, the note, Undo,
-// Submit). Options marked ▸ open the next ring; the middle goes back one ring. Tap the options the same way (there
-// are no lasers at the menus). Note and Meaning open a keyboard with a microphone key for dictation.
-// The right-wrist button: Annotate ▸ in Inspect; Submit (with the number of marks) in Annotate.
+// follow what you are doing: the scene (its parts to select, parts to add, Edit part), or one part, inspected (◀ Scene,
+// Annotate) or marked up (tools, mark style, the note, Undo, Submit). Options marked ▸ open the next ring; the middle
+// goes back one ring. Tap the options the same way (there are no lasers at the menus). Note and Meaning open a
+// keyboard with a microphone key for dictation.
+// The right-wrist button: Edit ▸ (the selected part) in the scene; Annotate ▸ in Inspect; Submit (with the number of
+// marks) in Annotate.
 import * as THREE from 'three';
 import {TOOL_NAMES} from './tools.js';
 import {createVoice} from './vr-voice.js';
@@ -33,7 +35,7 @@ function wrapText(c,value,width,maxLines) {
   return lines.slice(0,maxLines);
 }
 
-export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,submit,undo,fit,backgrounds,voiceCommands,api}) {
+export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,setStage,select,exit,submit,undo,fit,backgrounds,voiceCommands,api}) {
   const face=surface('watch',.045,.045,256),radial=surface('pie menu',.42,.42,1024),keyboard=surface('keyboard',.62,.34,1600);
   const wrist=surface('wrist button',.075,.04,512),caption=surface('caption',.34,.05,870);
   for(const s of [face,radial,keyboard,wrist,caption])scene.add(s.mesh);
@@ -42,6 +44,23 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
   let menu=null,stack=[],hovered=new Set(),field='description',text='',then=null,voiceNote='';
   const settings=()=>link.state?.settings||{};
   const marks=()=>link.state?.annotations.length||0;
+  const objects=()=>link.state?.scene.objects||[];
+  const selected=()=>objects().find(o=>o.id===link.state?.selected)||null;
+  const shorten=(name,length)=>name.length>length?`${name.slice(0,length-1)}…`:name;
+  // The open project's part files, for Add (fetched when the Add ring opens).
+  let projectFiles={project:null,files:null};
+  function loadProjectFiles() {
+    const project=link.state?.scene.source?.project||null;
+    if(projectFiles.project===project&&projectFiles.files)return;
+    projectFiles={project,files:project?null:[]};
+    if(project)api(`/api/projects/${encodeURIComponent(project)}`).then(detail=>{if(projectFiles.project===project){projectFiles.files=detail.parts;radial.signature='';}})
+      .catch(()=>{projectFiles.files=[];radial.signature='';});
+  }
+  function editPart() {
+    const item=selected();
+    if(!item){say('Pick a part first: point at it and pinch');return;}
+    closeMenu();setStage('object');say(`Editing ${item.name}`);
+  }
   const set=changes=>link.settings(changes).catch(()=>{});
   // Dictation: the words heard are added to the text, to check (or fix) before tapping Done.
   const voice=createVoice({api,onText:heard=>{text=`${text}${text&&!/\s$/.test(text)?' ':''}${heard}`.slice(0,LIMITS[field]);voiceNote='';keyboard.signature='';},
@@ -62,10 +81,16 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
   const step=(label,delta,aliases)=>({key:label,label,aliases,local:true,
     press:()=>set({brush_radius_mm:Math.min(100,Math.max(.5,Math.round((settings().brush_radius_mm+delta)*2)/2))})});
   const MENUS={
-    inspect:{title:'Inspect',items:()=>[
-      {key:'background',label:'Background',aliases:['backgrounds','room'],open:'background',detail:backgrounds.list.find(b=>b.key===backgrounds.current)?.label},
+    scene:{title:'Scene',value:()=>link.state?.scene.name||'',items:()=>[
+      {key:'parts',label:'Parts',aliases:['select a part','parts list'],open:'parts:0',detail:selected()?shorten(selected().name,18):`${objects().length} parts`},
+      {key:'add',label:'Add part',aliases:['add','add a part'],open:'add:0',detail:link.state?.scene.source?.project?shorten(link.state.scene.source.project,18):'From a project'},
+      {key:'edit',label:'Edit part',aliases:['edit','edit this part'],detail:selected()?shorten(selected().name,18):'Pick one first',primary:Boolean(selected()),press:()=>editPart()},
       {key:'reset',label:'Reset view',press:()=>fit()},
-      {key:'annotate',label:'Annotate',aliases:['annotate mode'],detail:'Mark the model',press:()=>setMode('edit')},
+      {key:'settings',label:'Settings',open:'settings',detail:voiceCommands.on?'Voice on':'Voice off'}]},
+    inspect:{title:'Inspect',value:()=>shorten(link.state?.model.name||'',14),items:()=>[
+      {key:'scene',label:'◀ Scene',aliases:['scene','back to scene','whole scene'],detail:'All parts',press:()=>{setStage('scene');}},
+      {key:'reset',label:'Reset view',press:()=>fit()},
+      {key:'annotate',label:'Annotate',aliases:['annotate mode'],detail:'Mark this part',press:()=>setMode('edit')},
       {key:'settings',label:'Settings',open:'settings',detail:voiceCommands.on?'Voice on':'Voice off'}]},
     annotate:{title:'Annotate',items:()=>[
       {key:'tools',label:'Tools',open:'tools',detail:TOOL_NAMES[settings().tool]},
@@ -73,6 +98,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
       {key:'note',label:'Note',aliases:['take a note'],detail:settings().description?.trim()?'Written':'Empty',press:()=>openKeyboard('description')},
       {key:'undo',label:'Undo mark',aliases:['undo'],detail:`${marks()} marks`,press:()=>undo()},
       {key:'submit',label:'Submit',aliases:['submit edit','send'],detail:'to the desktop',primary:true,press:()=>send()},
+      {key:'scene',label:'◀ Scene',aliases:['scene','back to scene','whole scene'],detail:'All parts',press:()=>{setStage('scene');}},
       {key:'settings',label:'Settings',open:'settings',detail:voiceCommands.on?'Voice on':'Voice off'}]},
     // Choosing a tool closes the menu, so the next pinch on the model uses it.
     tools:{title:'Tools',items:()=>[{key:'inspect',label:'Move model',aliases:['inspect','move'],active:settings().mode==='inspect',press:()=>{setMode('inspect');closeMenu();}},
@@ -90,6 +116,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
       step('+',.5,['plus','larger']),step('++',5,['plus five','much larger'])]},
     background:{title:'Background',items:()=>backgrounds.list.map(b=>({key:b.key,label:b.label,active:backgrounds.current===b.key,press:()=>backgrounds.set(b.key)}))},
     settings:{title:'Settings',items:()=>[
+      {key:'background',label:'Background',aliases:['backgrounds','room'],open:'background',detail:backgrounds.list.find(b=>b.key===backgrounds.current)?.label},
       {key:'voice',label:voiceCommands.on?'Voice: on':'Voice: off',aliases:['voice'],active:voiceCommands.on,press:()=>voiceCommands.toggle()},
       {key:'exit',label:'Exit VR',aliases:['exit'],open:'exit'}]},
     // Leaving VR, and sending by voice, take a second, deliberate choice.
@@ -98,9 +125,28 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
     send:{title:'Send to desktop?',value:()=>`${marks()} marks`,items:()=>[{key:'confirm',label:'Yes, send',aliases:['yes','send','send it'],local:true,primary:true,press:()=>send()},
       {key:'stay',label:'Not yet',aliases:['no','cancel','wait'],local:true,press:()=>closeMenu()}]},
   };
+  // Rings made as they are needed: the scene's parts and the project's part files, six to a ring, with More ▸.
+  const PAGE=6;
+  function paged(list,page,next,item) {
+    const shown=list.length>PAGE+1?list.slice(page*PAGE,page*PAGE+PAGE):list;
+    const items=shown.map(item);
+    if(list.length>PAGE+1&&(page+1)*PAGE<list.length)items.push({key:'more',label:'More',aliases:['more parts','next'],local:true,open:`${next}:${page+1}`,detail:`${list.length-(page+1)*PAGE} more`});
+    return items;
+  }
+  function menuOf(key) {
+    const [kind,page]=key.split(':');
+    if(kind==='parts')return {title:Number(page)?`Parts · ${Number(page)+1}`:'Parts',items:()=>paged(objects(),Number(page),'parts',o=>({key:o.id,label:o.name,detail:[o.category,o.marks?`${o.marks} marks`:null].filter(Boolean).join(' · ')||null,
+      active:o.id===link.state?.selected,press:()=>{select(o.id);stack=[top()];menu=top();radial.signature='';say(`Selected ${o.name}`);}}))};
+    if(kind==='add'){loadProjectFiles();return {title:'Add part',items:()=>{
+      if(projectFiles.files===null)return [{key:'loading',label:'Loading…',local:true,press:()=>{}}];
+      if(!projectFiles.files.length)return [{key:'upload',label:'Upload',detail:'On the computer: Import',local:true,press:()=>say('Add parts on the computer: Import, or Open project')}];
+      return paged(projectFiles.files,Number(page),'add',file=>({key:file.replace(/[^\w.-]/g,'_'),label:file.split('/').pop().replace(/\.(stl|obj)$/i,'').replace(/[_-]+/g,' '),detail:'＋ beside the scene',
+        press:()=>{say(`Adding ${file.split('/').pop()}…`);api('/api/projects/add',{project:projectFiles.project,file}).then(()=>{say(`Added ${file.split('/').pop()}`);stack=[top()];menu=top();radial.signature='';}).catch(error=>say(error.message));}}));}};}
+    return MENUS[key];
+  }
   // A menu's items, with each `open` item opening its ring.
-  const itemsOf=key=>MENUS[key].items().map(item=>item.open?{...item,press:()=>open(item.open)}:item);
-  const top=()=>mode()==='edit'?'annotate':'inspect';
+  const itemsOf=key=>menuOf(key).items().map(item=>item.open?{...item,press:()=>open(item.open)}:item);
+  const top=()=>stage()==='scene'?'scene':mode()==='edit'?'annotate':'inspect';
   function open(key){stack.push(key);menu=key;radial.signature='';}
   function back(){stack.pop();menu=stack.at(-1)||null;radial.signature='';if(!menu)closeMenu();}
   function openMenu(path=[]) {
@@ -112,8 +158,9 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
   function closeMenu(){radial.mesh.visible=false;menu=null;stack=[];}
   // "Open tools", "show style", …: a ring by name, from wherever the watch is.
   function openNamed(name) {
-    const key={'mark style':'style',backgrounds:'background'}[name]||name;
-    if(['tools','style'].includes(key)&&mode()!=='edit')setMode('edit');
+    const key={'mark style':'style',backgrounds:'background',parts:'parts:0',add:'add:0'}[name]||name;
+    if(key==='background'){openMenu(['settings','background']);return true;}
+    if(['tools','style'].includes(key)){if(stage()!=='object')return false;if(mode()!=='edit')setMode('edit');}
     const root=['tools','style'].includes(key)?'annotate':top();
     if(!itemsOf(root).some(item=>item.open===key))return false;
     openMenu([key]);stack[0]=root;return true;
@@ -140,18 +187,18 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
   // ---------- drawing ----------
   function drawFace() {
     const c=face.context,s=face.canvas.width,isOpen=radial.mesh.visible||keyboard.mesh.visible,hot=hovered.has('watch:face');
-    const signature=`${isOpen}:${hot}:${mode()}`;if(signature===face.signature)return;face.signature=signature;
+    const signature=`${isOpen}:${hot}:${top()}`;if(signature===face.signature)return;face.signature=signature;
     c.clearRect(0,0,s,s);
-    c.beginPath();c.arc(s/2,s/2,s/2-8,0,Math.PI*2);c.fillStyle=hot?UI.hover:'#101820';c.fill();c.lineWidth=10;c.strokeStyle=isOpen?UI.ink:mode()==='edit'?UI.accent:UI.mint;c.stroke();
+    c.beginPath();c.arc(s/2,s/2,s/2-8,0,Math.PI*2);c.fillStyle=hot?UI.hover:'#101820';c.fill();c.lineWidth=10;c.strokeStyle=isOpen?UI.ink:top()==='annotate'?UI.accent:UI.mint;c.stroke();
     // A small pie menu as the dial.
-    for(let i=0;i<6;i++){const a=i/6*Math.PI*2;c.beginPath();c.arc(s/2+Math.cos(a)*62,s/2+Math.sin(a)*62,14,0,Math.PI*2);c.fillStyle=mode()==='edit'?UI.accent:UI.mint;c.fill();}
+    for(let i=0;i<6;i++){const a=i/6*Math.PI*2;c.beginPath();c.arc(s/2+Math.cos(a)*62,s/2+Math.sin(a)*62,14,0,Math.PI*2);c.fillStyle=top()==='annotate'?UI.accent:UI.mint;c.fill();}
     c.beginPath();c.arc(s/2,s/2,26,0,Math.PI*2);c.fillStyle=UI.ink;c.fill();
     face.regions=[{id:'watch:face',contains:()=>true,press:()=>(radial.mesh.visible||keyboard.mesh.visible)?close():openMenu()}];
     face.texture.needsUpdate=true;
   }
   function drawRadial() {
     if(!radial.mesh.visible||!menu)return;
-    const spec=MENUS[menu],items=itemsOf(menu),value=spec.value?.()||'';
+    const spec=menuOf(menu),items=itemsOf(menu),value=spec.value?.()||'';
     const signature=JSON.stringify([stack,items.map(item=>[item.label,item.active,item.detail,item.swatch]),value,[...hovered]]);
     if(signature===radial.signature)return;radial.signature=signature;
     const c=radial.context,S=radial.canvas.width,C=S/2,outer=500,inner=175,n=Math.max(items.length,1),slice=Math.PI*2/n;
@@ -182,7 +229,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
     c.beginPath();c.arc(C,C,inner-12,0,Math.PI*2);c.fillStyle=hot?UI.hover:'#0d141bf5';c.fill();c.lineWidth=4;c.strokeStyle=UI.accent;c.stroke();
     c.fillStyle=UI.accent;c.font=`650 30px ${UI.sans}`;c.textAlign='center';
     wrapText(c,spec.title.toUpperCase(),280,2).forEach((line,k)=>c.fillText(line,C,C-70+k*34));
-    if(stack.length>2){c.fillStyle=UI.muted;c.font=`500 22px ${UI.sans}`;c.fillText(stack.slice(1,-1).map(key=>MENUS[key].title).join(' › ').slice(0,30),C,C-112);}
+    if(stack.length>2){c.fillStyle=UI.muted;c.font=`500 22px ${UI.sans}`;c.fillText(stack.slice(1,-1).map(key=>menuOf(key).title).join(' › ').slice(0,30),C,C-112);}
     if(value){c.fillStyle=UI.ink;c.font=`600 ${value.length>8?32:48}px ${UI.sans}`;c.fillText(value,C,C+5);}
     c.fillStyle=UI.muted;c.font=`600 34px ${UI.sans}`;c.fillText(first?'Close':'‹ Back',C,C+72);
     radial.regions.push({id:'radial:center',press:back,contains:(x,y)=>Math.hypot(x-C,y-C)<inner-12});
@@ -227,13 +274,14 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
   }
   // The right wrist's button: Annotate ▸ in Inspect, Submit (with the number of marks) in Annotate.
   function drawWrist() {
-    const inspecting=mode()!=='edit',label=inspecting?'Annotate ▸':`Submit · ${marks()}`,hot=hovered.has('wrist:button');
+    const inScene=stage()==='scene',inspecting=!inScene&&mode()!=='edit',hot=hovered.has('wrist:button');
+    const label=inScene?(selected()?'Edit ▸':'Pick a part'):inspecting?'Annotate ▸':`Submit · ${marks()}`;
     const signature=JSON.stringify([label,hot]);if(signature===wrist.signature)return;wrist.signature=signature;
-    const c=wrist.context,W=wrist.canvas.width,H=wrist.canvas.height;
-    c.clearRect(0,0,W,H);c.beginPath();c.roundRect(8,8,W-16,H-16,60);c.fillStyle=hot?'#3d6f68':inspecting?UI.raised:UI.primary;c.fill();
-    c.lineWidth=10;c.strokeStyle=inspecting?UI.mint:UI.accent;c.stroke();
-    c.fillStyle='#fffbe8';c.font=`700 ${label.length>9?76:92}px ${UI.sans}`;c.textAlign='center';c.textBaseline='middle';c.fillText(label,W/2,H/2+4);
-    wrist.regions=[{id:'wrist:button',contains:()=>true,press:()=>inspecting?setMode('edit'):send()}];
+    const c=wrist.context,W=wrist.canvas.width,H=wrist.canvas.height,idle=inScene&&!selected();
+    c.clearRect(0,0,W,H);c.beginPath();c.roundRect(8,8,W-16,H-16,60);c.fillStyle=hot?'#3d6f68':idle?'#1c2731':inScene||inspecting?UI.raised:UI.primary;c.fill();
+    c.lineWidth=10;c.strokeStyle=idle?UI.line:inScene||inspecting?UI.mint:UI.accent;c.stroke();
+    c.fillStyle=idle?UI.muted:'#fffbe8';c.font=`700 ${label.length>9?76:92}px ${UI.sans}`;c.textAlign='center';c.textBaseline='middle';c.fillText(label,W/2,H/2+4);
+    wrist.regions=[{id:'wrist:button',contains:()=>true,press:()=>inScene?editPart():inspecting?setMode('edit'):send()}];
     wrist.texture.needsUpdate=true;
   }
 
@@ -287,6 +335,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
     hovered=new Set(hands.map(hand=>hand.uiHover).filter(Boolean));
     // The mode changed (on the computer, by voice, or from the wrist): the menu follows it.
     if(radial.mesh.visible&&stack[0]!==top()&&!['tools','style'].includes(stack[1])){stack=[top()];menu=top();radial.signature='';}
+    if(radial.mesh.visible&&menu&&!menuOf(menu))back();
     drawFace();drawRadial();drawKeyboard();drawWrist();
     if(caption.mesh.visible&&performance.now()>captionUntil)caption.mesh.visible=false;
   }
@@ -310,9 +359,8 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
       const seen=new Set();
       const walk=(key,path)=>{if(seen.has(key))return;seen.add(key);
         for(const item of itemsOf(key)) {
-          if(item.local)continue;
-          options.push({label:item.label,aliases:item.aliases||[],press:press(()=>{stack=[...path];menu=stack.at(-1);item.press();})});
-          if(item.open)walk(item.open,[...path,item.open]);
+          if(!item.local)options.push({label:item.label,aliases:item.aliases||[],press:press(()=>{stack=[...path];menu=stack.at(-1);item.press();})});
+          if(item.open)walk(item.open,[...path,item.open]);   // a ring's More pages too
         }};
       walk(top(),[top()]);
       return options;
@@ -325,7 +373,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,exit,sub
     return options;
   }
 
-  return {update,pointer,close,say,voiceOptions,openNamed,confirmSend,dictate,send,
+  return {update,pointer,close,say,voiceOptions,openNamed,confirmSend,dictate,send,editPart,
     openMenu:()=>{if(!radial.mesh.visible)openMenu();},
     get searching(){return voice.state!=='idle';},   // the keyboard's microphone is in use
     // Any menu up: the model is not gripped or marked meanwhile.

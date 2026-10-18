@@ -29,7 +29,7 @@ export function matchOption(text,options) {
 // is named in full ("spray paint", "pin a note") or with "tool" ("measure tool"), so a passing word does not switch it.
 export const COMMANDS=[
   {name:'open-menu',label:'Open menu',pattern:/\b(open|show)( the)? menu\b/},
-  {name:'open-named',label:'Open tools',pattern:/\b(?:open|show)(?: the)? (tools|style|mark style|settings|backgrounds?)\b/},
+  {name:'open-named',label:'Open tools',pattern:/\b(?:open|show)(?: the)? (parts|tools|style|mark style|settings|backgrounds?)\b/},
   {name:'tool',label:'Spray paint',pattern:/\b(spray|region|box|pin|measure|erase|eraser)( paint)? tool\b|\b(spray paint|3d region|pin a note|erase mark)\b/},
   {name:'note',label:'Take a note',pattern:/\b(take|write)( a)? note\b|\bdictate\b/},
   {name:'undo',label:'Undo',pattern:/\bundo( the)?( last)?( mark)?\b/},
@@ -37,6 +37,8 @@ export const COMMANDS=[
   {name:'inspect',label:'Inspect mode',pattern:/\b(inspect|move) mode\b|\bswitch to inspect\b/},
   {name:'annotate',label:'Annotate mode',pattern:/\bannotate mode\b|\bswitch to annotate\b|\bstart annotating\b/},
   {name:'reset',label:'Reset view',pattern:/\breset( the)? view\b/},
+  {name:'edit-part',label:'Edit part',pattern:/\bedit( this| the| that)? (part|object)\b/},
+  {name:'scene',label:'Back to scene',pattern:/\bback to( the)? scene\b|\bshow( me)?( the)?( whole)? scene\b/},
   {name:'exit',label:'Exit program',pattern:/\b(exit|quit|close)( the)? (program|vr)\b/},
 ];
 const TOOL_WORDS={spray:'spray','spray paint':'spray',region:'box',box:'box','3d region':'box',pin:'pin','pin a note':'pin',measure:'measure',erase:'erase',eraser:'erase','erase mark':'erase'};

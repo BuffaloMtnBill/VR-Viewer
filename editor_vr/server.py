@@ -17,12 +17,14 @@ from . import mesh
 LOGGER=logging.getLogger(__name__)
 
 
-def create_app(data_dir=None,transcriber=None):
+def create_app(data_dir=None,transcriber=None,models_dir=None):
     app=Flask(__name__)
     app.config.update(MAX_CONTENT_LENGTH=30*1024*1024,TRUSTED_HOSTS=['localhost','127.0.0.1','[::1]'],PAIRING=None,HEADSET_URLS=[])
     root=Path(data_dir or os.environ.get('EDITOR_VR_DATA',Path(__file__).resolve().parents[1]/'data'))
     workspace=Workspace(root);hub=Hub();token=secrets.token_urlsafe(32)
     transcriber=transcriber or Transcriber()
+    # Model projects to open (the Visualizer's layout: one folder per model, with preview/*_assembled.3mf and stl/).
+    projects=Path(models_dir or os.environ.get('EDITOR_VR_MODELS',Path.home()/'Projects'/'Models')).expanduser()
     app.extensions['editor_vr']={'workspace':workspace,'hub':hub,'token':token,'transcriber':transcriber}
     sock=Sock(app)
 
@@ -81,22 +83,83 @@ def create_app(data_dir=None,transcriber=None):
     def state():return jsonify(workspace.snapshot())
     @app.post('/api/action')
     def action():
-        result=workspace.action(request.get_json(silent=True));hub.publish({'type':'state','revision':result['revision']});return jsonify(result)
+        return publish(workspace.action(request.get_json(silent=True)))
     @app.post('/api/submit')
     def submit():
-        result=workspace.submit(request.get_json(silent=True));hub.publish({'type':'state','revision':result['revision']});return jsonify(result)
+        return publish(workspace.submit(request.get_json(silent=True)))
+    def publish(result):
+        hub.publish({'type':'state','revision':result['revision']});return jsonify(result)
     @app.post('/api/models')
     def upload():
-        source=request.files.get('model')
-        if source is None or not source.filename:raise ValueError('Choose an STL or OBJ model.')
-        filename=source.filename.replace('\\','/').rsplit('/',1)[-1][:180]
-        vertices,faces=mesh.load_model(source.read(),filename,request.form.get('units','mm'))
-        result=workspace.install(vertices,faces,filename)
-        hub.publish({'type':'state','revision':result['revision']});return jsonify(result)
+        """Meshes from this device: added to the scene (mode=add, the default) or opened as a new scene (mode=open)."""
+        sources=[f for f in request.files.getlist('model') if f and f.filename]
+        if not sources:raise ValueError('Choose STL, OBJ, or 3MF models.')
+        if len(sources)>16:raise ValueError('Choose at most 16 files at once.')
+        parts=[]
+        for source in sources:
+            filename=source.filename.replace('\\','/').rsplit('/',1)[-1][:180]
+            parts+=mesh.load_parts(source.read(),filename,request.form.get('units','mm'))
+        if request.form.get('mode')=='open':
+            name=sources[0].filename.replace('\\','/').rsplit('/',1)[-1].rsplit('.',1)[0] if len(sources)==1 else f'{len(sources)} imported files'
+            return publish(workspace.open_scene(parts,name,'Uploaded meshes'))
+        return publish(workspace.add_objects(parts,'Uploaded mesh'))
     @app.post('/api/demo')
     def example():
-        result=workspace.install(*mesh.demo(),name='Fluted study vessel',source='Built-in print model')
-        hub.publish({'type':'state','revision':result['revision']});return jsonify(result)
+        return publish(workspace.open_scene(mesh.demo_scene(),'Fluted study vessel','Built-in scene'))
+
+    # ---------- model projects on this computer ----------
+    def project_folder(name):
+        if not isinstance(name,str) or not name or name.startswith('.') or '/' in name or '\\' in name:raise ValueError('Choose a project.')
+        folder=(projects/name).resolve()
+        if folder.parent!=projects.resolve() or not folder.is_dir():raise ValueError('That project was not found.')
+        return folder
+    def project_file(folder,relative):
+        if not isinstance(relative,str) or not relative:raise ValueError('Choose a model file.')
+        path=(folder/relative).resolve()
+        if not path.is_relative_to(folder) or not path.is_file() or path.suffix.lower() not in ('.stl','.obj','.3mf'):raise ValueError('That model file was not found.')
+        if path.stat().st_size>300*1024*1024:raise ValueError('That model file is too large.')
+        return path
+    def describe(folder):
+        """A project's assembled scenes (preview/*.3mf, or other 3MFs) and its part files (stl/, or the folder's own)."""
+        scenes=sorted(p.relative_to(folder).as_posix() for p in [*folder.glob('preview/*.3mf'),*folder.glob('*.3mf')])
+        parts=sorted(p.relative_to(folder).as_posix() for p in folder.glob('stl/*') if p.suffix.lower() in ('.stl','.obj'))
+        parts=parts or sorted(p.name for p in folder.iterdir() if p.is_file() and p.suffix.lower() in ('.stl','.obj'))
+        return {'name':folder.name,'scenes':scenes,'parts':parts}
+    @app.get('/api/projects')
+    def project_list():
+        if not projects.is_dir():return jsonify(root=str(projects),projects=[])
+        found=[describe(f) for f in sorted(projects.iterdir(),key=lambda f:f.name.lower()) if f.is_dir() and not f.name.startswith('.')]
+        return jsonify(root=str(projects),projects=[p for p in found if p['scenes'] or p['parts']])
+    @app.get('/api/projects/<name>')
+    def project_detail(name):return jsonify(describe(project_folder(name)))
+    @app.post('/api/projects/open')
+    def project_open():
+        """A project as the scene: one of its assembled 3MFs, or (without one) every part file, side by side."""
+        payload=request.get_json(silent=True) or {}
+        folder=project_folder(payload.get('project'))
+        info=describe(folder)
+        chosen=payload.get('file') or (info['scenes'][0] if info['scenes'] else None)
+        source={'project':folder.name,'file':chosen}
+        if chosen:
+            path=project_file(folder,chosen)
+            parts=mesh.load_parts(path.read_bytes(),path.name,split=path.suffix.lower()!='.stl')
+            return publish(workspace.open_scene(parts,f'{folder.name} · {path.stem}',source))
+        if not info['parts']:raise ValueError('That project has no model files.')
+        result=None
+        for k,relative in enumerate(info['parts'][:24]):
+            path=project_file(folder,relative)
+            parts=mesh.load_parts(path.read_bytes(),path.name,split=False)
+            result=workspace.open_scene(parts,folder.name,source) if k==0 else workspace.add_objects(parts,source)
+        return publish(result)
+    @app.post('/api/projects/add')
+    def project_add():
+        """One of a project's part files, added to the scene beside what is there."""
+        payload=request.get_json(silent=True) or {}
+        folder=project_folder(payload.get('project'))
+        path=project_file(folder,payload.get('file'))
+        parts=mesh.load_parts(path.read_bytes(),path.name,split=False)
+        for part in parts:part['print_file']=part['print_file'] or path.relative_to(folder).as_posix()
+        return publish(workspace.add_objects(parts,{'project':folder.name,'file':path.relative_to(folder).as_posix()}))
     @app.get('/api/models/<key>/mesh')
     def geometry(key):
         try:vertices,faces=workspace.model(key)

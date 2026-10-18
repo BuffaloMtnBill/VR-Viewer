@@ -104,14 +104,14 @@ def test_invalid_settings(client,changes):
 
 def test_print_upload_units_and_mesh_validation(client):
     obj=b'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n'
-    response=client.post('/api/models',headers=headers(client),data={'model':(io.BytesIO(obj),'../triangle.obj'),'units':'cm'})
+    response=client.post('/api/models',headers=headers(client),data={'model':(io.BytesIO(obj),'../triangle.obj'),'units':'cm','mode':'open'})
     assert response.status_code==200
-    assert response.json['model']['name']=='triangle.obj'
+    assert response.json['scene']['name']=='triangle' and response.json['model']['name']=='triangle'
     assert response.json['model']['dimensions_mm']==[10,10,0]
     assert not response.json['model']['watertight']
     bad=client.post('/api/models',headers=headers(client),data={'model':(io.BytesIO(b'bad'),'x.stl')})
     assert bad.status_code==400
-    assert client.get('/api/workspace').json['model']['name']=='triangle.obj'
+    assert client.get('/api/workspace').json['model']['name']=='triangle'
 
 
 def test_source_stl_roundtrip_and_negative_obj_indices():

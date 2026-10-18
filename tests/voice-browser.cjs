@@ -16,19 +16,24 @@ const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js')
     const page=await browser.newPage({viewport:{width:1400,height:950},permissions:['microphone']}),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     // What the computer "hears": commands for each clip in turn; a dictated note when the keyboard asks.
-    const heard=['Open menu.','Annotate.','Smooth or blend.','Back.','Measure tool.','Submit.','Not yet.','Take a note.'],sent=[];
+    const heard=['Open menu.','Stand.','Edit part.','Annotate mode.','Open menu.','Smooth or blend.','Back.','Measure tool.','Submit.','Not yet.','Take a note.','Back to scene.'],sent=[];
     await page.route('**/api/transcribe',route=>{const body=route.request().postDataJSON();sent.push(body);
       route.fulfill({json:{text:body.purpose==='note'?'Round the rim by 2 mm.':heard.shift()??''}});});
     await page.addInitScript({content:`${await fs.readFile(iwer,'utf8')}\nwindow.xrDevice=new IWER.XRDevice(IWER.metaQuest3);window.xrDevice.installRuntime({forceInstall:true});`});
     await page.goto(url);await page.waitForFunction(()=>window.editor?.ready);
     await page.evaluate(async()=>{await editor.link.command('/api/demo',{});await editor.link.settings({mode:'inspect',description:'',tool:'spray',color:'#ffb86b'});});
+    await page.waitForFunction(()=>editor.viewer.meshes?.size===2);
     await page.locator('#enter-vr').click();await page.waitForFunction(()=>editor.vr.presenting);
     await page.waitForFunction(()=>editor.vr.state.commands.state==='listening',null,{timeout:10000});
     const until=(fn,arg)=>page.waitForFunction(fn,arg,{timeout:25000});
 
-    // "Open menu" opens Inspect's ring; "Annotate" (an option on show) switches mode, and the menu follows.
-    await until(()=>editor.vr.state.watch.menu==='inspect');
+    // "Open menu" opens the scene's ring; "Stand" (a part, in Parts ▸) selects it; "Edit part" shows it alone.
+    await until(()=>editor.vr.state.watch.menu==='scene');
     assert.equal(sent[0].purpose,'command');
+    const stand=await page.evaluate(()=>editor.link.state.scene.objects.find(o=>o.name==='Stand').id);
+    await until(id=>editor.link.state.selected===id,stand);
+    await until(id=>editor.link.state.stage==='object'&&editor.link.state.model.object_id===id,stand);
+    // "Annotate mode" (a command: the menu has closed); "Open menu" now opens Annotate's ring.
     await until(()=>editor.link.state.settings.mode==='edit');
     await until(()=>editor.vr.state.watch.menu==='annotate');
     // "Smooth or blend" lives two rings in (Mark style ▸ Color): it is chosen, and the menu shows Mark style.
@@ -51,7 +56,9 @@ const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js')
     await page.evaluate(()=>{const p=editor.vr.regionPoint('key:voice');xrDevice.controllers.right.position.set(p[0],p[1],p[2]+.06);});
     await until(()=>editor.vr.state.watch.text==='Round the rim by 2 mm.');
     assert.equal(sent.find(body=>body.purpose==='note').rate,16000);
+    // "Back to scene": every part again.
+    await until(()=>editor.link.state.stage==='scene');
     assert.deepEqual(errors,[],`No page errors: ${errors.join('; ')}`);
-    console.log('VR voice commands, options from any ring, confirmation before sending, and dictation passed.');
+    console.log('VR voice commands, parts by name, Edit part and Back to scene, options from any ring, confirmation before sending, and dictation passed.');
   } finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

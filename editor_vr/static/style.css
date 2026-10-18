@@ -5,3 +5,15 @@
 .headset-page .tool-rail,.headset-page .activity-rail,.headset-page .instruction-card,.headset-page .workspace-bottom,.headset-page #connect-headset,.headset-page .model-actions,.headset-page .viewport-controls,.headset-page .viewport-note,.headset-page .edition{display:none}
 .headset-page .studio{display:block}.headset-page .model-column{max-width:1100px;margin:0 auto}.headset-page .viewport-wrap{height:calc(100vh - 420px);min-height:320px}
 .headset-page #enter-vr{font-size:26px;padding:20px 30px;gap:30px}.headset-page .topbar{height:auto;min-height:90px}
+
+.stage-scene .part-only,.stage-object .scene-only{display:none!important}.scene-panel{margin-top:24px}.scene-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.scene-actions .primary{gap:12px}
+.part-list{display:flex;flex-direction:column;gap:2px;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;background:#111419}
+.part-group{font-size:8px;letter-spacing:1.3px;color:#6c7686;padding:8px 6px 3px;text-transform:uppercase}
+.part-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 8px;border-radius:6px;border:1px solid transparent;font-size:11px}
+.part-row small{margin-left:auto;color:var(--muted);font-size:9px;white-space:nowrap}.part-row b{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.part-row[aria-selected=true]{background:#ffb86b14;border-color:#ffb86b66}.part-row[aria-selected=true] b{color:var(--accent)}.part-row .marks{color:#252219;background:var(--accent);border-radius:9px;padding:1px 6px;font-size:9px}
+.project-list{max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:12px}.project{border:1px solid #3c4857;border-radius:9px;padding:12px}
+.project h3{font-size:14px;font-weight:550;margin-bottom:8px}.project-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.project-files button{font-size:11px;border:1px solid #4b5666;border-radius:6px;padding:6px 9px}
+.project-files button.open{border-color:#ffb86b88;color:var(--accent)}#import-mode{margin:14px 0}#project-parts{margin:14px 0}
+.tool-rail>.part-only{display:contents}
+@media(max-width:760px){.tool-rail>.scene-panel,.tool-rail>.part-only>.section-heading,.tool-rail>.part-only>.segmented,.tool-rail>.part-only>.tools,.tool-rail>.part-only>.palette{grid-column:1/-1}.part-row b{max-width:55vw}}

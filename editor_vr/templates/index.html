@@ -21,7 +21,14 @@
 </header>
 <main class="studio">
   <aside class="tool-rail">
-    <div class="rail-heading"><span class="eyebrow">WORKSPACE / 01</span><h1>Make your<br>intent visible.</h1><p>Mark the model. Describe the change.<br>Continue on your computer.</p></div>
+    <div class="rail-heading"><span class="eyebrow">WORKSPACE / 01</span><h1>Make your<br>intent visible.</h1><p>Open a scene. Pick a part to edit.<br>Mark it, describe the change.</p></div>
+    <section class="scene-panel">
+      <div class="section-heading"><span>00</span><h2 id="scene-heading">Scene</h2></div>
+      <div class="scene-actions scene-only"><button id="open-project" class="quiet">Open project…</button><button id="add-part" class="quiet">＋ Add part</button></div>
+      <div id="part-list" class="part-list" role="listbox" aria-label="Parts in the scene"></div>
+      <div class="scene-actions"><button id="edit-part" class="primary scene-only" disabled>Edit part <span>▸</span></button><button id="remove-part" class="quiet scene-only" disabled>Remove</button><button id="back-to-scene" class="quiet part-only">◀ Back to scene</button></div>
+    </section>
+    <div class="part-only">
     <div class="section-heading"><span>01</span><h2>Interaction</h2></div>
     <div class="segmented" aria-label="Interaction mode"><button data-mode="inspect" aria-pressed="true">↻ Inspect</button><button data-mode="edit" aria-pressed="false">✦ Annotate</button></div>
     <div class="section-heading"><span>02</span><h2>Choose a tool</h2></div>
@@ -39,20 +46,21 @@
     <label class="field">Color means<input id="meaning" maxlength="80" value="Add or enlarge" placeholder="What this color means"></label>
     <label class="field">Edit category<select id="category"><option value="size">Size & proportions</option><option value="texture">Surface texture</option><option value="pattern">Pattern & detail</option><option value="general">General edit</option></select></label>
     <label class="field radius-field">Brush radius <output id="brush-value">6 mm</output><input id="brush-radius" type="range" min="0.5" max="30" step="0.5" value="6"></label>
+    </div>
     <div class="rail-tip"><span>◇</span><p>In VR, tap the watch on your left wrist for tools, the note and Submit, or just say what you want.</p></div>
   </aside>
   <section class="model-column">
-    <div class="headset-card headset-only"><span class="eyebrow">IN THE HEADSET</span><h2>Mark the model in VR.</h2><p>Tap the watch on your left wrist for tools, the note and Submit; the button on your right wrist switches to Annotate, then submits. The edit desk stays on the computer.</p></div>
-    <div class="model-heading"><div><span class="eyebrow">SHARED MODEL</span><h2 id="model-name">Loading your workspace…</h2></div><div class="model-actions"><button id="load-demo" class="icon-button" title="Load the demo model">◇ Demo</button><button id="import-model" class="quiet">＋ Import model</button><input id="model-file" type="file" accept=".stl,.obj" hidden></div></div>
+    <div class="headset-card headset-only"><span class="eyebrow">IN THE HEADSET</span><h2>The scene, in VR.</h2><p>Point at a part and pinch to select it; the button on your right wrist edits it, switches to Annotate, then submits. Tap the watch on your left wrist for the menus. Projects open on the computer.</p></div>
+    <div class="model-heading"><div><span class="eyebrow" id="model-eyebrow">SHARED SCENE</span><h2 id="model-name">Loading your workspace…</h2></div><div class="model-actions"><button id="load-demo" class="icon-button" title="Open the demo scene">◇ Demo</button><button id="import-model" class="quiet">＋ Import</button><input id="model-file" type="file" accept=".stl,.obj,.3mf" multiple hidden></div></div>
     <div class="viewport-wrap">
       <canvas id="viewport" aria-label="Interactive model. Orbit in Inspect mode, or select an annotation tool in Annotate mode."></canvas>
-      <div class="viewport-top"><span class="view-badge" id="view-badge">INSPECT MODE</span><span id="model-dimensions">Millimeters</span></div>
-      <div class="viewport-note" id="tool-hint">Drag to orbit · right-drag to pan · scroll to zoom</div>
+      <div class="viewport-top"><span class="view-badge" id="view-badge">SCENE</span><span id="model-dimensions">Millimeters</span></div>
+      <div class="viewport-note" id="tool-hint">Click a part to select it · double-click to edit it · drag to orbit</div>
       <div class="viewport-controls"><button id="fit-view" title="Reset model placement and fit the view">⌖ Fit</button><button id="turn-model" title="Turn model 45 degrees">↻ Turn</button><button id="zoom-out" aria-label="Make model smaller">−</button><button id="zoom-in" aria-label="Make model larger">＋</button><button id="wireframe" aria-pressed="false">▧ Wire</button></div>
       <div id="viewer-error" hidden></div>
     </div>
     <div class="model-footer"><span><i></i> <span id="model-stats">Loading geometry</span></span><span id="selected-count">No selected faces</span><span id="last-change">Local workspace</span></div>
-    <section class="instruction-card"><div class="instruction-title"><span class="step-label">04</span><div><h2>What would you like to change?</h2><p>Your marked regions travel with this instruction.</p></div><span class="draft-badge">EDIT REQUEST</span></div>
+    <section class="instruction-card part-only"><div class="instruction-title"><span class="step-label">04</span><div><h2>What would you like to change?</h2><p>Your marked regions travel with this instruction.</p></div><span class="draft-badge">EDIT REQUEST</span></div>
       <textarea id="description" maxlength="2000" rows="3" placeholder="For example: widen this opening by 2 mm and soften the edge…" aria-label="Describe the requested edit"></textarea>
       <div class="instruction-actions"><span id="draft-summary">Mark an area to begin.</span><button id="submit-request" class="primary">Submit to desktop <span>↗</span></button></div>
     </section>
@@ -71,6 +79,9 @@
 <div id="headset-addresses">{% for url in headset_urls %}<code>{{ url }}</code>{% else %}<p>Start the server without <code>--local</code> to enable HTTPS and headset pairing.</p>{% endfor %}</div>
 {% if pairing_pin %}<div class="pin-display"><span>HEADSET PIN</span><strong>{{ pairing_pin }}</strong></div>{% endif %}
 <p class="dialog-footnote">A local network connection. Your models stay on this computer.</p></dialog>
-<dialog id="import-dialog"><div class="dialog-heading"><span class="eyebrow">BRING YOUR OWN GEOMETRY</span><button id="close-import" aria-label="Close">×</button></div><h2>Import a print model.</h2><p>STL or OBJ · up to 100,000 triangles · 30 MB maximum</p><label class="field">File units<select id="import-units"><option value="mm">Millimeters (usual for printing)</option><option value="cm">Centimeters</option><option value="m">Meters</option></select></label><p>Current draft marks will be cleared. Submitted requests keep their original model and annotations.</p><button id="choose-file" class="primary">Choose STL or OBJ ↗</button></dialog>
+<dialog id="import-dialog"><div class="dialog-heading"><span class="eyebrow">BRING YOUR OWN GEOMETRY</span><button id="close-import" aria-label="Close">×</button></div><h2>Import parts.</h2><p>STL, OBJ, or 3MF · 30 MB per upload. A 3MF's objects, an OBJ's groups and the separate pieces of an STL each become a part; large parts are simplified for VR.</p>
+<div class="segmented" id="import-mode" aria-label="What to do with the files"><button data-import="add" aria-pressed="true">Add to the scene</button><button data-import="open" aria-pressed="false">Open as a new scene</button></div>
+<div id="project-parts" hidden><p class="eyebrow">FROM THE OPEN PROJECT</p><div id="project-part-list" class="project-files"></div></div><label class="field">File units<select id="import-units"><option value="mm">Millimeters (usual for printing)</option><option value="cm">Centimeters</option><option value="m">Meters</option></select></label><p id="import-note">Added parts stand in a row beside the scene. Submitted requests keep their own copies.</p><button id="choose-file" class="primary">Choose files ↗</button></dialog>
+<dialog id="project-dialog"><div class="dialog-heading"><span class="eyebrow">MODEL PROJECTS ON THIS COMPUTER</span><button id="close-projects" aria-label="Close">×</button></div><h2>Open a project.</h2><p id="project-root">Looking for projects…</p><div id="project-list" class="project-list"></div></dialog>
 </body>
 </html>

@@ -26,10 +26,11 @@ def main():
     parser.add_argument('--local',action='store_true',help='Desktop-only HTTP on loopback')
     parser.add_argument('--no-browser',action='store_true')
     parser.add_argument('--data-dir',type=Path)
+    parser.add_argument('--models',type=Path,help='Folder of model projects to open (default ~/Projects/Models, or EDITOR_VR_MODELS)')
     parser.add_argument('--forget-devices',action='store_true')
     args=parser.parse_args()
     if not 1024<=args.port<=65535:parser.error('Port must be 1024–65535.')
-    app=create_app(args.data_dir)
+    app=create_app(args.data_dir,models_dir=args.models)
     host=args.host or ('127.0.0.1' if args.local else '0.0.0.0')
     ssl_context=None; pairing=None
     if args.local:

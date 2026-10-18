@@ -1,4 +1,4 @@
-// Annotate mode's marking: the one place in VR with a laser. Each hand (or controller) points its ray at the model, in
+// The laser: picking parts in the scene, and Annotate mode's marking. Each hand (or controller) points its ray at the model, in
 // the mark's color, and a pinch (or the trigger) applies the chosen tool where it lands: spray while held, drag out a
 // 3D region, pin, the two ends of a measurement, or erase a mark. The interface is tapped with a fingertip instead,
 // so the laser is hidden while a hand is at the menus.
@@ -23,13 +23,14 @@ export function createAnnotate({scene,viewer,tools,link}) {
     raycaster.set(hand.controller.getWorldPosition(new THREE.Vector3()),new THREE.Vector3(0,0,-1).transformDirection(hand.controller.matrixWorld));
     return raycaster;
   }
-  // Every frame for each hand: aim, and show the laser (or hide it, when `shown` is false). Returns the model hit.
-  function aim(hand,shown) {
+  // Every frame for each hand: aim, and show the laser (or hide it, when `shown` is false). Returns the model hit
+  // (in the scene, with the part's objectId). `color` overrides the mark's color (the scene's selecting laser).
+  function aim(hand,shown,color=null) {
     const laser=laserOf(hand);
     if(!shown){laser.line.visible=false;laser.spot.visible=false;hand.hit=null;return null;}
     const ray=rayOf(hand),hit=viewer.hit(ray);
     laser.line.visible=true;laser.line.scale.z=hit?.distance||1.5;
-    laser.line.material.color.set(hit?link.state.settings.color:'#7f9bae');
+    laser.line.material.color.set(hit?color||link.state.settings.color:'#7f9bae');
     laser.spot.visible=Boolean(hit);if(hit)laser.spot.position.copy(hit.point);
     hand.hit=hit;hand.ray=ray;
     return hit;

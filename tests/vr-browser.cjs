@@ -20,7 +20,7 @@ const output=path.resolve(__dirname,'../test-results');
   assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('headset-page')),true,'The headset gets the simple page');
   assert.equal(await page.locator('.tool-rail').isVisible(),false,'without the desktop rails');
   await page.evaluate(async()=>{await editor.link.command('/api/demo',{});await editor.link.settings({mode:'inspect',description:'',tool:'spray',color:'#ffb86b',category:'size',brush_radius_mm:6});});
-  await page.waitForFunction(()=>editor.viewer.modelId===editor.link.state.model.id);
+  await page.waitForFunction(()=>editor.viewer.meshes.size===2&&editor.viewer.stage==='scene');
   await page.locator('#enter-vr').click();await page.waitForFunction(()=>editor.vr.presenting);await page.waitForTimeout(350);
   const state=()=>page.evaluate(()=>editor.vr.state),frames=(n=1)=>page.waitForTimeout(90*n);
   const source=(side)=>input==='hand'?`xrDevice.hands.${side}`:`xrDevice.controllers.${side}`;
@@ -46,31 +46,63 @@ const output=path.resolve(__dirname,'../test-results');
    await place(side,[at[0],at[1],at[2]+.1]);await place(side,rest[side]);await frames(2);
   }
 
-  // Inspect: one hand grips and moves the model; two scale and turn it.
+  // The scene comes first. Point the laser at the vessel and pinch (pull the trigger): it is selected.
+  const aimAt=async(side,name,from=[0,0,.35])=>page.evaluate(async({side,name,from,input})=>{const THREE=await import('three'),v=editor.viewer,item=editor.link.state.scene.objects.find(o=>o.name===name);
+    const mesh=[...v.meshes.values()].find(m=>m.userData.objectId===item.id);mesh.geometry.computeBoundingBox();const b=mesh.geometry.boundingBox;
+    const target=mesh.localToWorld(new THREE.Vector3((b.min.x+b.max.x)/2,b.min.y,(b.min.z+b.max.z)/2+(b.max.z-b.min.z)*.25));
+    const s=input==='hand'?xrDevice.hands[side]:xrDevice.controllers[side];s.position.set(target.x+from[0],target.y+from[1],target.z+from[2]);s.quaternion.set(0,0,0,1);},{side,name,from,input});
+  let s=await state();
+  assert.equal(s.stage,'scene');assert.equal(s.selected,null);
+  await aimAt('right','Fluted vessel');await frames(3);
+  s=await state();assert.ok(s.lasers.some(l=>l.side==='right'&&l.shown&&l.onModel),`The scene's laser lands on a part: ${JSON.stringify(s.lasers)}`);
+  const vessel=await page.evaluate(()=>editor.link.state.scene.objects.find(o=>o.name==='Fluted vessel').id);
+  await press('right',1);await press('right',0);
+  await page.waitForFunction(id=>editor.link.state.selected===id,vessel);
+  await desktop.waitForFunction(id=>editor.link.state.selected===id,vessel);
+  await page.waitForFunction(()=>/Fluted vessel/.test(editor.vr.state.watch.caption||''));
+  // Pinching away from the parts (the laser pointing up) grips the whole scene; two hands scale and turn it.
+  const up=[Math.sin(Math.PI/4),0,0,Math.cos(Math.PI/4)];   // pointing up: the laser misses the scene
   const before=(await state()).transform.position;
-  await place('right',[.22,1.25,-.35]);await press('right',1);assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
-  await place('right',[.32,1.25,-.35]);assert.ok(Math.abs((await state()).transform.position[0]-before[0])>.06,'One-hand gripping moves the model');await press('right',0);
-  await place('left',[-.13,1.25,-.35]);await place('right',[.13,1.25,-.35]);
+  await place('right',[.22,1.25,-.35],up);await press('right',1);assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
+  await place('right',[.32,1.25,-.35],up);assert.ok(Math.abs((await state()).transform.position[0]-before[0])>.06,'One hand moves the scene');await press('right',0);
+  await place('left',[-.13,1.25,-.35],up);await place('right',[.13,1.25,-.35],up);
   await press('left',1);await press('right',1);const small=(await state()).transform.scale;
-  await place('left',[-.23,1.25,-.35]);await place('right',[.23,1.25,-.35]);assert.ok((await state()).transform.scale>small*1.4,'Two hands scale the model');
+  await place('left',[-.23,1.25,-.35],up);await place('right',[.23,1.25,-.35],up);assert.ok((await state()).transform.scale>small*1.4,'Two hands scale the scene');
   const turnedFrom=(await state()).transform.quaternion;
-  await place('left',[0,1.25,-.12]);await place('right',[0,1.25,-.58]);
-  assert.ok(Math.abs((await state()).transform.quaternion.reduce((sum,q,i)=>sum+q*turnedFrom[i],0))<.9,'Turning the hand pair turns the model');
+  await place('left',[0,1.25,-.12],up);await place('right',[0,1.25,-.58],up);
+  assert.ok(Math.abs((await state()).transform.quaternion.reduce((sum,q,i)=>sum+q*turnedFrom[i],0))<.9,'Turning the hand pair turns the scene');
   await press('left',0);await press('right',0);await page.evaluate(()=>editor.fit());await atRest();
-  assert.equal((await state()).lasers.some(l=>l.shown),false,'No laser in Inspect');
+  assert.equal((await state()).selected,vessel,'Gripping the scene keeps the selection');
 
-  // The watch on the left wrist opens Inspect's pie: the room, Reset view, Annotate, Settings.
+  // The watch on the left wrist opens the scene's pie: Parts, Add part, Edit part, Reset view, Settings.
   assert.ok((await state()).watch.face,'The watch is on the left wrist');
   await tap('watch:face');
-  let s=await state();
-  assert.equal(s.watch.menu,'inspect');
-  assert.deepEqual(s.watch.regions.radial,['radial:inspect:background','radial:inspect:reset','radial:inspect:annotate','radial:inspect:settings','radial:center']);
-  await tap('radial:inspect:background');await tap('radial:background:lake');
+  s=await state();assert.equal(s.watch.menu,'scene');
+  assert.deepEqual(s.watch.regions.radial,['radial:scene:parts','radial:scene:add','radial:scene:edit','radial:scene:reset','radial:scene:settings','radial:center']);
+  await tap('radial:scene:add');assert.deepEqual((await state()).watch.regions.radial,['radial:add:0:upload','radial:center'],'Without a project, Add points to the computer');
+  await tap('radial:center');
+  // Settings ▸ Background: the room around the scene.
+  await tap('radial:scene:settings');await tap('radial:settings:background');await tap('radial:background:lake');
   await page.waitForFunction(()=>editor.vr.state.backgroundShown==='lake.jpg');
   await page.waitForTimeout(400);await page.screenshot({path:path.join(output,`vr-${input}-lake.png`)});
   await tap('radial:background:studio');assert.equal((await state()).backgroundShown,'studio');
-  await tap('radial:center');assert.equal((await state()).watch.menu,'inspect','Back one ring');
+  await tap('radial:center');await tap('radial:center');assert.equal((await state()).watch.menu,'scene','Back one ring at a time');
   await tap('radial:center');assert.equal((await state()).watch.menu,null,'Close');
+
+  // The right wrist's Edit ▸ shows the selected part alone, in Inspect.
+  assert.equal((await state()).watch.buttonLabel,'Edit ▸');
+  await tap('wrist:button','left');
+  await page.waitForFunction(id=>editor.link.state.stage==='object'&&editor.link.state.model.object_id===id&&editor.viewer.stage==='object',vessel);
+  assert.equal(await page.evaluate(()=>[...editor.viewer.meshes.values()].filter(m=>m.visible).length),1,'The part alone');
+  assert.equal((await state()).lasers.some(l=>l.shown),false,'No laser in Inspect');
+  // Inspect: one hand grips and turns the part.
+  const partFrom=(await state()).transform.position;
+  await place('right',[.22,1.25,-.35]);await press('right',1);await place('right',[.32,1.25,-.35]);
+  assert.ok(Math.abs((await state()).transform.position[0]-partFrom[0])>.06,'One hand moves the part');await press('right',0);await atRest();
+  await tap('watch:face');
+  s=await state();assert.equal(s.watch.menu,'inspect');
+  assert.deepEqual(s.watch.regions.radial,['radial:inspect:scene','radial:inspect:reset','radial:inspect:annotate','radial:inspect:settings','radial:center']);
+  await tap('radial:center');
 
   // The right wrist's button: Annotate ▸, tapped with the other hand.
   assert.equal((await state()).watch.buttonLabel,'Annotate ▸');
@@ -82,7 +114,7 @@ const output=path.resolve(__dirname,'../test-results');
   // Annotate's pie: Tools ▸ a tool closes it; Mark style ▸ Color and Category return to Mark style; Brush steps.
   await tap('watch:face');
   s=await state();assert.equal(s.watch.menu,'annotate');
-  assert.deepEqual(s.watch.regions.radial,['radial:annotate:tools','radial:annotate:style','radial:annotate:note','radial:annotate:undo','radial:annotate:submit','radial:annotate:settings','radial:center']);
+  assert.deepEqual(s.watch.regions.radial,['radial:annotate:tools','radial:annotate:style','radial:annotate:note','radial:annotate:undo','radial:annotate:submit','radial:annotate:scene','radial:annotate:settings','radial:center']);
   await tap('radial:annotate:tools');await tap('radial:tools:pin');
   await page.waitForFunction(()=>editor.link.state.settings.tool==='pin');assert.equal((await state()).watch.menu,null,'Choosing a tool closes the menu');
   await tap('watch:face');await tap('radial:annotate:style');await tap('radial:style:color');await tap('radial:color:2');
@@ -102,9 +134,8 @@ const output=path.resolve(__dirname,'../test-results');
   await desktop.waitForFunction(()=>document.getElementById('description').value==='smooth');
   assert.equal((await state()).watch.keyboard,null,'Done puts the keyboard away');
 
-  // Marking: the laser shows in Annotate; point it at the model's front and pinch (the trigger) to pin a note.
-  await page.evaluate(async input=>{const THREE=await import('three'),v=editor.viewer,b=v.mesh.geometry.boundingBox;const target=v.world(new THREE.Vector3(0,b.min.y,(b.min.z+b.max.z)/2));const s=input==='hand'?xrDevice.hands.right:xrDevice.controllers.right;s.position.set(target.x,target.y,target.z+.35);s.quaternion.set(0,0,0,1);},input);
-  await frames(3);
+  // Marking: the laser shows in Annotate; point it at the part's front and pinch (the trigger) to pin a note.
+  await aimAt('right','Fluted vessel');await frames(3);
   s=await state();assert.ok(s.lasers.some(l=>l.side==='right'&&l.shown&&l.onModel),`The laser lands on the model: ${JSON.stringify(s.lasers)}`);
   await press('right',1);await press('right',0);
   await page.waitForFunction(()=>editor.link.state.annotations.length===1);
@@ -136,8 +167,17 @@ const output=path.resolve(__dirname,'../test-results');
     for(const hand of sizes){assert.ok(hand.size<.6,'Tracked hand mesh stays hand-sized');assert.equal(hand.dots,0,'Joint dots hide once the hand model is ready');}
   }
 
+  // ◀ Scene: every part again; Parts ▸ selects another (and returns to the scene's ring).
+  await tap('watch:face');await tap('radial:annotate:scene');
+  await page.waitForFunction(()=>editor.link.state.stage==='scene'&&editor.viewer.stage==='scene');
+  assert.equal(await page.evaluate(()=>[...editor.viewer.meshes.values()].filter(m=>m.visible).length),2);
+  const stand=await page.evaluate(()=>editor.link.state.scene.objects.find(o=>o.name==='Stand').id);
+  await page.waitForFunction(()=>editor.vr.state.watch.menu==='scene');
+  await tap('radial:scene:parts');await tap(`radial:parts:0:${stand}`);
+  await page.waitForFunction(id=>editor.link.state.selected===id,stand);assert.equal((await state()).watch.menu,'scene');
+  await tap('radial:center');
   // Exit VR asks first: Settings ▸ Exit VR ▸ Stay goes back; Yes, exit leaves.
-  await tap('watch:face');await tap('radial:annotate:settings');await tap('radial:settings:exit');
+  await tap('watch:face');await tap('radial:scene:settings');await tap('radial:settings:exit');
   assert.equal((await state()).watch.menu,'exit');
   await tap('radial:exit:stay');assert.equal((await state()).watch.menu,'settings');assert.equal(await page.evaluate(()=>editor.vr.presenting),true);
   await tap('radial:settings:exit');await tap('radial:exit:confirm');
@@ -145,5 +185,5 @@ const output=path.resolve(__dirname,'../test-results');
   assert.equal(await page.evaluate(()=>editor.vr.state.backgroundShown),'studio','Leaving VR puts the studio back');
   await page.close();
  }
- assert.deepEqual(errors,[]);console.log('Quest controller and tracked-hand gripping and scaling, the watch pie in Inspect and Annotate, backgrounds, keyboard, laser marking, wrist Annotate and Submit, Exit confirmation, and desktop following passed.');
+ assert.deepEqual(errors,[]);console.log('Quest controller and tracked-hand scene selection by laser, gripping and scaling, Edit part, the watch pie in the scene, Inspect and Annotate, backgrounds, keyboard, laser marking, wrist Annotate and Submit, Exit confirmation, and desktop following passed.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
