@@ -4,6 +4,12 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#14171c">
 <meta name="editor-token" content="{{ token }}"><title>Editor-VR · spatial model studio</title>
 <link rel="stylesheet" href="/static/style.css">
+<script nonce="{{ token }}">
+  // The headset's browser gets a simple page: the model, the connection, and a large Enter VR. ?full shows everything;
+  // ?headset shows the simple page anywhere.
+  (()=>{const query=new URLSearchParams(location.search);
+    if(!query.has('full')&&(query.has('headset')||/OculusBrowser|Quest|Pico/i.test(navigator.userAgent)))document.documentElement.classList.add('headset-page');})();
+</script>
 <script nonce="{{ token }}" type="importmap">{"imports":{"three":"/static/vendor/three.module.js"}}</script>
 <script type="module" src="/static/app.js"></script>
 </head>
@@ -11,7 +17,7 @@
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark">◈</span> Editor<span class="brand-vr">VR</span><span class="edition">SPATIAL STUDIO</span></a>
   <div class="connection"><i id="connection-dot"></i><span id="connection-state">Connecting…</span><span class="divider"></span><span id="peer-count">1 workspace</span></div>
-  <div class="header-actions"><button id="connect-headset" class="quiet">Connect headset ↗</button><button id="enter-vr" class="primary" disabled>Enter VR <span>◉</span></button></div>
+  <div class="header-actions"><a class="quiet headset-only" href="?full">Full page ↗</a><button id="connect-headset" class="quiet">Connect headset ↗</button><button id="enter-vr" class="primary" disabled>Enter VR <span>◉</span></button></div>
 </header>
 <main class="studio">
   <aside class="tool-rail">
@@ -33,9 +39,10 @@
     <label class="field">Color means<input id="meaning" maxlength="80" value="Add or enlarge" placeholder="What this color means"></label>
     <label class="field">Edit category<select id="category"><option value="size">Size & proportions</option><option value="texture">Surface texture</option><option value="pattern">Pattern & detail</option><option value="general">General edit</option></select></label>
     <label class="field radius-field">Brush radius <output id="brush-value">6 mm</output><input id="brush-radius" type="range" min="0.5" max="30" step="0.5" value="6"></label>
-    <div class="rail-tip"><span>◇</span><p>In VR, raise your left wrist for tools, a keyboard, and Submit.</p></div>
+    <div class="rail-tip"><span>◇</span><p>In VR, tap the watch on your left wrist for tools, the note and Submit, or just say what you want.</p></div>
   </aside>
   <section class="model-column">
+    <div class="headset-card headset-only"><span class="eyebrow">IN THE HEADSET</span><h2>Mark the model in VR.</h2><p>Tap the watch on your left wrist for tools, the note and Submit; the button on your right wrist switches to Annotate, then submits. The edit desk stays on the computer.</p></div>
     <div class="model-heading"><div><span class="eyebrow">SHARED MODEL</span><h2 id="model-name">Loading your workspace…</h2></div><div class="model-actions"><button id="load-demo" class="icon-button" title="Load the demo model">◇ Demo</button><button id="import-model" class="quiet">＋ Import model</button><input id="model-file" type="file" accept=".stl,.obj" hidden></div></div>
     <div class="viewport-wrap">
       <canvas id="viewport" aria-label="Interactive model. Orbit in Inspect mode, or select an annotation tool in Annotate mode."></canvas>
@@ -56,7 +63,7 @@
     <div class="queue-notice"><i></i><span>Editing pipeline · placeholder<br><small>Requests are saved; mesh edits are not run yet.</small></span></div>
     <section><div class="list-heading"><h3>Current marks <span id="annotation-count">0</span></h3><div><button id="undo" title="Undo the last mark">↶ Undo</button><button id="clear" title="Clear current marks">Clear</button></div></div><div id="annotations" class="mark-list"><p class="empty-note">Your first mark starts a conversation with the model.</p></div></section>
     <section class="queue-section"><div class="list-heading"><h3>Submitted requests</h3></div><div id="requests"><div class="empty-queue"><span>↗</span><h4>Ready when you are.</h4><p>Paint, select, or pin a region.<br>Then send an edit from here or your wrist.</p></div></div></section>
-    <div class="shortcut-note"><span>HAND CONTROLS</span><p>Point + pinch to select.<br>One hand to move; two to rotate & scale.<br>Use Inspect to grab anywhere.</p></div>
+    <div class="shortcut-note"><span>HAND CONTROLS</span><p>Tap menus with a fingertip.<br>Inspect: pinch or fist to move; two hands to scale.<br>Annotate: point the laser and pinch; a fist moves.</p></div>
   </aside>
 </main>
 <div id="toast" role="status" aria-live="polite" hidden></div>

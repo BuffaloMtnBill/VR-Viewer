@@ -2,16 +2,16 @@ import * as THREE from 'three';
 import {WorkspaceLink,uid} from './link.js';
 import {ModelViewer} from './viewer.js';
 import {AnnotationTools,TOOL_NAMES} from './tools.js';
-import {EditorXR} from './xr.js';
-const $=id=>document.getElementById(id),link=new WorkspaceLink();let viewer,xr,tools,toastTimer,currentModel=null,applying=Promise.resolve(),wire=false,pointerDown=false;
-function notify(message,error=false){$('toast').textContent=message;$('toast').hidden=false;$('toast').classList.toggle('error',error);clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,error?7000:3500);xr?.notify(message);}
+import {createVR} from './vr.js';
+const $=id=>document.getElementById(id),link=new WorkspaceLink();let viewer,vr,tools,toastTimer,currentModel=null,applying=Promise.resolve(),wire=false,pointerDown=false;
+function notify(message,error=false){$('toast').textContent=message;$('toast').hidden=false;$('toast').classList.toggle('error',error);clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,error?7000:3500);vr?.notify(message);}
 const act=command=>link.action(command).catch(()=>{});
 const set=changes=>{if(changes.tool||changes.mode)tools?.cancel();return link.settings(changes).catch(()=>{});};
 let submission=null;
 function submit(){if(submission)return submission;$('submit-request').disabled=true;submission=link.submit().then(()=>notify('Edit request saved. The desktop packet is ready.')).catch(error=>{notify(error.message,true);throw error;}).finally(()=>{submission=null;$('submit-request').disabled=false;});return submission;}
 function undo(){return act({type:'undo'});}
 function fit(){if(!link.state)return;tools?.cancel();const dimensions=link.state.model.dimensions_mm;const transform={position:[0,1.12,-.85],quaternion:[0,0,0,1],scale:.55/Math.max(...dimensions)};viewer?.transform(transform,true);viewer?.fitCamera();return act({type:'transform',transform});}
-try{viewer=new ModelViewer($('viewport'));tools=new AnnotationTools(viewer,link,notify);xr=new EditorXR(viewer,link,tools,{settings:set,submit,undo,fit,notify,presenting:value=>{$('enter-vr').textContent=value?'In VR · use headset':'Enter VR ◉';}});viewer.onFrame=(time,frame)=>xr.update(time,frame);xr.attachButton($('enter-vr'));}
+try{viewer=new ModelViewer($('viewport'));tools=new AnnotationTools(viewer,link,notify);vr=createVR(viewer,link,tools,{settings:set,submit,undo,fit,notify,presenting:value=>{$('enter-vr').textContent=value?'In VR · use headset':'Enter VR ◉';}});viewer.onFrame=(time,frame)=>vr.update(time,frame);vr.attachButton($('enter-vr'));}
 catch(error){$('viewer-error').hidden=false;$('viewer-error').textContent='The 3D view needs WebGL. '+error.message;}
 function updateSettings(settings){
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===settings.mode)));
@@ -40,8 +40,8 @@ function drawLists(state){
   }
 }
 link.addEventListener('state',({detail:state})=>{
-  if(viewer?.modelId&&viewer.modelId!==state.model.id){tools.cancel();xr?.cancelInteraction();pointerDown=false;}
-  updateSettings(state.settings);drawLists(state);xr?.updateState(state);$('last-change').textContent=state.updated_by?'Updated by '+state.updated_by:'Local workspace';
+  if(viewer?.modelId&&viewer.modelId!==state.model.id){tools.cancel();vr?.cancelInteraction();pointerDown=false;}
+  updateSettings(state.settings);drawLists(state);$('last-change').textContent=state.updated_by?'Updated by '+state.updated_by:'Local workspace';
   $('model-name').textContent=state.model.name;$('model-dimensions').textContent=state.model.dimensions_mm.map(n=>Number(n.toFixed(1))).join(' × ')+' mm';$('model-stats').textContent=state.model.triangles.toLocaleString()+' triangles · '+(state.model.watertight?'closed mesh':'check mesh before printing');
   applying=applying.then(async()=>{if(!viewer)return;if(currentModel!==state.model.id){tools.cancel();await viewer.load(state.model);currentModel=state.model.id;viewer.fitCamera();}const latest=link.state;if(currentModel!==latest.model.id)return;viewer.transform(latest.transform);if(!tools.active)viewer.color(latest.annotations);viewer.wireframe(wire);}).catch(error=>notify(error.message,true));
 });
@@ -68,8 +68,8 @@ if(viewer){
   viewer.canvas.addEventListener('pointerdown',event=>{if(event.button!==0||!link.state||link.state.settings.mode!=='edit'||event.shiftKey)return;event.preventDefault();const r=ray(event);if(tools.begin(viewer.hit(r),r)){pointerDown=true;viewer.canvas.setPointerCapture(event.pointerId);}});
   viewer.canvas.addEventListener('pointermove',event=>{if(!pointerDown||!tools.active)return;const r=ray(event);tools.update(viewer.hit(r),r);});
   viewer.canvas.addEventListener('pointerup',()=>{if(pointerDown){tools.end();pointerDown=false;}});viewer.canvas.addEventListener('pointercancel',()=>{tools.cancel();pointerDown=false;});
-  document.addEventListener('keydown',event=>{if(event.target.matches('input,textarea,select')||event.target.isContentEditable)return;if(event.key==='Escape'){tools.cancel();xr?.ui.close();}const key=Number(event.key);if(key>=1&&key<=5)set({tool:Object.keys(TOOL_NAMES)[key-1],mode:'edit'});if(event.key==='Shift')viewer.controls.enableRotate=true;});
+  document.addEventListener('keydown',event=>{if(event.target.matches('input,textarea,select')||event.target.isContentEditable)return;if(event.key==='Escape')tools.cancel();const key=Number(event.key);if(key>=1&&key<=5)set({tool:Object.keys(TOOL_NAMES)[key-1],mode:'edit'});if(event.key==='Shift')viewer.controls.enableRotate=true;});
   document.addEventListener('keyup',event=>{if(event.key==='Shift'&&link.state)viewer.controls.enableRotate=link.state.settings.mode==='inspect';});
 }
-window.editor={link,viewer,tools,xr,fit,submit,get ready(){return Boolean(viewer?.mesh&&link.state);},get modelId(){return currentModel;}};
+window.editor={link,viewer,tools,vr,fit,submit,get ready(){return Boolean(viewer?.mesh&&link.state);},get modelId(){return currentModel;}};
 await link.start();

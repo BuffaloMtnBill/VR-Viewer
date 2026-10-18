@@ -55,32 +55,52 @@ Importing another model or loading the demo clears current draft marks, while su
 - **Inspect:** left-drag orbits, right-drag pans, and the wheel zooms the desktop camera.
 - **Annotate:** left-click/drag uses the selected tool. Right-drag and the wheel still navigate; hold Shift to orbit. The camera view is local to each device, while the model's placement and annotation data are shared.
 - **Fit, Turn, −, +:** reset, rotate or scale the shared displayed model. This changes its presentation, not its print dimensions.
-- **1–5:** choose spray, box, pin, measure or erase. **Escape:** cancel an unfinished selection or close the VR tool panel.
+- **1–5:** choose spray, box, pin, measure or erase. **Escape:** cancel an unfinished selection.
 - Set a color, a meaning for that color, an edit category, and a brush radius. Write the requested change, then **Submit to desktop**.
 
 ## VR controls
 
-Both tracked hands and controllers work. Hands use their WebXR target ray and thumb/index pinch; controllers use their pointing ray and trigger. Hands are drawn with locally hosted hand meshes, with a joint-dot fallback if those meshes cannot load.
+Both tracked hands and controllers work. Hands are drawn with locally hosted hand meshes, with a joint-dot fallback if those meshes cannot load. VR has two modes, a shared setting the desktop follows:
 
 | Action | Hands | Controllers |
 | --- | --- | --- |
-| Point at a UI button and activate it | Pinch | Trigger |
-| Move and turn the model in Inspect | Pinch and move/turn one hand | Hold trigger and move/turn |
-| Rotate and scale together | Hold both pinches, move hands apart/together or turn their relative line | Hold both triggers and move/turn |
-| Manipulate while annotating | Switch to Inspect on the wrist; a second simultaneous pinch also switches an active grab/selection to a two-hand grab | Hold the grip/squeeze button |
-| Apply a tool | Point at the model and pinch/drag in Annotate | Point and hold trigger |
+| Tap the watch, a menu, a key or the wrist button | Touch it with an index fingertip | Touch it with the small dot just in front of the controller |
+| **Inspect:** move and turn the model | Pinch (or make a fist) and move/turn the hand | Hold the trigger or grip button and move/turn |
+| **Inspect:** scale it | Grip with both hands, move them apart/together, turn their line | The same with both controllers |
+| **Annotate:** mark the model | Point the laser and pinch (spray: drag; 3D region: drag out the box) | Point the laser and hold the trigger |
+| **Annotate:** move the model | Make a fist | Hold the grip button |
 
-Raise the **left wrist** to use its watch panel. With controllers, it follows the left controller. If that input is not tracked, a fallback panel is placed to the left in front of the user.
+A second hand gripping while the first marks or grips turns both into a two-hand grip. The laser shows only in Annotate, in the mark's color, and only while the hand is away from the menus. While a menu or the keyboard is open, the model is neither gripped nor marked. A window that has only just opened under a fingertip is not pressed by it until the finger lifts off and comes back.
 
-- **Menu ◔** opens a pie menu in front of you. Point at a slice and pinch (or pull the trigger); the slice under each ray lights up, and each slice shows its current value. The centre is **Close** on the first ring and **‹ Back** (one ring up) on the others.
-  - **Tools ▸** Move model (Inspect), Spray paint, 3D region, Pin a note, Measure, Erase mark. Choosing one closes the menu so the next pinch on the model uses it.
-  - **Mark style ▸** Color ▸ (five colors with their meanings), Category ▸, Brush ▸ (−− / − / + / ++ in 5 mm and 0.5 mm steps), and Meaning (opens the keyboard).
-  - **Note** (opens the keyboard), **Undo mark**, **Reset view** and **Submit**.
-- The larger panel opened from Note or Meaning keeps its **Tools** tab with every setting on one page.
-- **Instruction** opens a ray-selectable QWERTY keyboard with numbers, punctuation, space and backspace. The color-meaning field can also be edited there.
-- **Submit** on the watch, or **Submit edit** in the larger panel, sends the draft to the computer. If the instruction is empty, it opens the keyboard. If nothing is marked, it asks for a selection first.
+**The watch on your left wrist** (on top of the left controller): tap its dial and a pie menu opens in front of you, within reach. A slice marked ▸ opens the next ring; every slice shows its current value; the middle shows where you are and goes back one ring (or closes the menu on the first ring). Tapping the watch again closes it from anywhere.
 
-Close the expanded tool panel to mark model areas behind it. UI targeting takes priority over the model so selecting a tool does not accidentally paint through the panel. Removing and replacing a hand/controller ends its grab; leaving VR returns to the desktop view. Recenter the headset through the Quest system if its room reference changes.
+| Mode | First ring | Inside |
+| --- | --- | --- |
+| Inspect | Background ▸ · Reset view · Annotate · Settings ▸ | **Background:** Studio (the desktop's room), Mellow forest, Sandy desert, Moonlit lake, remembered by the headset's browser |
+| Annotate | Tools ▸ · Mark style ▸ · Note · Undo mark · Submit · Settings ▸ | **Tools:** Move model (back to Inspect) and the five tools; choosing one closes the menu. **Mark style:** Color ▸ (the five colors and their meanings), Category ▸, Brush ▸ (−− / − / + / ++ in 5 mm and 0.5 mm steps), Meaning |
+| Both | | **Settings:** Voice on/off, Exit VR ▸ (asks first: Yes, exit or Stay) |
+
+**The button on your right wrist** (on top of the right controller), tapped with the other hand: **Annotate ▸** in Inspect; **Submit · *n*** (the number of marks) in Annotate. Submit with no note opens the keyboard first, then sends when you tap Done.
+
+**The keyboard** (Note, and Mark style ▸ Meaning) floats in front of you. **🎤 Speak** records from the headset's microphone (allow it when asked); **■ Stop** (or 20 seconds) ends it, and the words heard are added to the text, to check before tapping **Done**, which saves it to the shared workspace. **Cancel** keeps the old text.
+
+**Voice commands.** While you are in VR the microphone stays open for commands:
+
+| Say | Does |
+| --- | --- |
+| "Open menu" | Opens the watch's menu |
+| "Open tools", "show mark style", "open settings", "open background" | Opens the menu at that ring |
+| "Spray paint", "3D region", "pin a note", "erase mark", or "measure tool" (any tool + "tool") | Chooses that tool, in Annotate |
+| "Take a note" / "dictate" | Opens the keyboard, already listening |
+| "Undo" | Undoes the last mark |
+| "Submit" | Asks "Send to desktop?": **Yes, send** or **Not yet** |
+| "Inspect mode" / "annotate mode" | Switches mode |
+| "Reset view" | Puts the model back on its table |
+| "Exit program" / "exit VR" | Leaves VR |
+
+While a menu is open, any option in the current mode's menus can be said, not only those on show ("Smooth or blend", "Pin a note", "Brush"): the menu moves to the ring where it lives, then does what tapping it would. On a tie the option on show wins. The brush steps, the confirmations, and Back and Close work only while on show. A caption in front of you shows what was heard. The headset finds where speech starts and stops by itself, so only those moments go to the computer, which transcribes them with Whisper (faster-whisper, on the CPU); nothing is sent while you are quiet, and nothing is saved. The first use downloads the speech model once (`small.en`, about 480 MB; `EDITOR_VR_WHISPER_MODEL=base.en` picks a smaller one). Listening pauses while you dictate, and **Settings ▸ Voice** switches it off.
+
+**The headset's browser** gets a simple page: the model, the connection and a large **Enter VR** (`?full` shows the whole desktop page there; `?headset` shows the simple page anywhere). Leaving VR returns to it; recenter the headset through the Quest system if its room reference changes.
 
 ## Toolkits
 
@@ -150,14 +170,15 @@ Mutations require the page's per-process request token and same-origin checks. R
 .venv/bin/python -m pytest -q
 ```
 
-Browser checks use Playwright/Chromium; VR checks use the IWER Meta Quest 3 emulator. With a separate local test server running:
+Browser checks use Playwright/Chromium; VR checks use the IWER Meta Quest 3 emulator. Set them up once, then run them all (the runner starts its own local test server with a fresh data folder, and runs the tests one at a time, since they change the same workspace):
 
 ```bash
-python app.py --local --port 8021 --no-browser --data-dir /tmp/editor-vr-test
-node tests/browser.cjs
-node tests/vr-browser.cjs
+npm install
+npm run setup          # Playwright's Chromium
+npm test               # tests/browser.cjs, voice-browser.cjs, vr-browser.cjs
+npm test -- vr voice   # some of them
 ```
 
-Install Playwright and IWER in a development tool directory, or point the tests at existing installations with `EDITOR_VR_PLAYWRIGHT`, `EDITOR_VR_CHROMIUM`, and `EDITOR_VR_IWER` (path to `iwer/build/iwer.min.js`). `EDITOR_VR_URL` selects a different server. Run browser tests sequentially: they deliberately change the same workspace. Screenshots are written to `test-results/`. For an additional HTTPS/LAN test, start a default HTTPS server on port 8022 and run `tests/https-browser.cjs` with `EDITOR_VR_LAN_URL=https://<LAN-IP>:8022`; it checks real pairing, secure cookies, WSS sync and PIN privacy using isolated browser sessions.
+`EDITOR_VR_TEST_PORT` picks another port (default 8021), `EDITOR_VR_CHROMIUM` another Chromium. A test can also run alone against a server you started, with `EDITOR_VR_URL`; `EDITOR_VR_INPUTS=hand` runs the VR test with tracked hands only. Screenshots are written to `test-results/`. For the HTTPS/LAN test, start a default HTTPS server on port 8022 and set `EDITOR_VR_LAN_URL=https://<LAN-IP>:8022`; `npm test` then includes `tests/https-browser.cjs`, which checks real pairing, secure cookies, WSS sync and PIN privacy using isolated browser sessions. GitHub Actions runs the Python tests on Linux, Windows and macOS, and the browser tests on Linux.
 
 Automated XR testing exercises emulated controllers and tracked hands; it does not replace checking comfort, text legibility, hand occlusion and certificate acceptance on a physical Quest. See `THIRD-PARTY.md` for the terrain-derived connection code and vendored asset licenses.

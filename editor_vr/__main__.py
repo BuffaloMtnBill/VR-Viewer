@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 from pathlib import Path
 import socket
 from threading import Thread
@@ -32,8 +33,12 @@ def main():
     host=args.host or ('127.0.0.1' if args.local else '0.0.0.0')
     ssl_context=None; pairing=None
     if args.local:
-        if host not in ('localhost','127.0.0.1','::1'):parser.error('--local must listen on loopback. Use default HTTPS for the network.')
-        url=f'http://127.0.0.1:{args.port}'
+        # No pairing or TLS here, so never on the network; localhost is pinned to its address rather than resolved.
+        if host=='localhost':host='127.0.0.1'
+        try:loopback=ipaddress.ip_address(host).is_loopback
+        except ValueError:loopback=False
+        if not loopback:parser.error('--local must listen on a loopback address. Use default HTTPS for the network.')
+        url=f'http://[{host}]:{args.port}' if ':' in host else f'http://{host}:{args.port}'
     else:
         import os
         addresses=local_addresses();hostname=socket.gethostname()

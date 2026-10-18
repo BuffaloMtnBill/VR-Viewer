@@ -1,5 +1,6 @@
 """One local-network workspace, shared by the desktop and paired headset."""
 import io
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -10,15 +11,19 @@ from werkzeug.exceptions import HTTPException
 from .live import Hub
 from .pairing import COOKIE,is_local
 from .workspace import Workspace,Conflict,identifier
+from .speech import Transcriber,decode_samples,purpose_of,vocabulary_of
 from . import mesh
 
+LOGGER=logging.getLogger(__name__)
 
-def create_app(data_dir=None):
+
+def create_app(data_dir=None,transcriber=None):
     app=Flask(__name__)
     app.config.update(MAX_CONTENT_LENGTH=30*1024*1024,TRUSTED_HOSTS=['localhost','127.0.0.1','[::1]'],PAIRING=None,HEADSET_URLS=[])
     root=Path(data_dir or os.environ.get('EDITOR_VR_DATA',Path(__file__).resolve().parents[1]/'data'))
     workspace=Workspace(root);hub=Hub();token=secrets.token_urlsafe(32)
-    app.extensions['editor_vr']={'workspace':workspace,'hub':hub,'token':token}
+    transcriber=transcriber or Transcriber()
+    app.extensions['editor_vr']={'workspace':workspace,'hub':hub,'token':token,'transcriber':transcriber}
     sock=Sock(app)
 
     @app.before_request
@@ -42,7 +47,8 @@ def create_app(data_dir=None):
         try:websocket=('wss://' if request.is_secure else 'ws://')+request.host
         except HTTPException:websocket="'self'"
         response.headers['Content-Security-Policy']=f"default-src 'self'; script-src 'self' 'nonce-{token}'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' {websocket}; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
-        response.headers['Permissions-Policy']='xr-spatial-tracking=(self)'
+        # The headset's microphone: VR dictation and voice commands.
+        response.headers['Permissions-Policy']='xr-spatial-tracking=(self), microphone=(self)'
         return response
 
     @app.errorhandler(HTTPException)
@@ -110,6 +116,20 @@ def create_app(data_dir=None):
         path=root/'requests'/f'{key}.{extension}'
         if not path.is_file():abort(404)
         return send_file(path,as_attachment=True,download_name=f'edit-request-{key[:8]}.{extension}')
+    @app.post('/api/transcribe')
+    def transcribe():
+        """VR dictation and voice commands: the headset's recording (16 kHz samples) to text, on this computer;
+        nothing is kept. purpose "note" expects an edit instruction, "command" the VR voice commands."""
+        if not transcriber.available():
+            return jsonify(error='Voice needs faster-whisper on the computer: pip install faster-whisper'),503
+        payload=request.get_json(silent=True)
+        samples,purpose=decode_samples(payload),purpose_of(payload)
+        vocabulary=vocabulary_of(payload) if purpose=='command' else ()
+        try:text=transcriber.transcribe(samples,purpose,vocabulary)
+        except Exception:
+            LOGGER.exception('Transcription failed')
+            return jsonify(error='That could not be understood. Try again, or type it.'),500
+        return jsonify(text=text[:2000])
     @sock.route('/api/live')
     def live(ws):hub.serve(ws)
     return app

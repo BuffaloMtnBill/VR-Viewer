@@ -1,4 +1,4 @@
-const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright-core');
 const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');
 const url=process.env.EDITOR_VR_URL||'http://127.0.0.1:8021';
 (async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.EDITOR_VR_CHROMIUM||undefined,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});try{

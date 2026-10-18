@@ -1,5 +1,5 @@
 /* Run a default HTTPS server and set EDITOR_VR_LAN_URL to its printed LAN address. */
-const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright');
+const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright-core');
 const assert=require('node:assert/strict');
 const desktopURL=process.env.EDITOR_VR_HTTPS_URL||'https://localhost:8022';
 const lanURL=process.env.EDITOR_VR_LAN_URL;

@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install the app and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Run the tests
+        run: python -m pytest -q
+
+  browser:
+    name: Browser and VR tests (Chromium, IWER)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install the app
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt
+      - name: Install Playwright, IWER, and Chromium
+        run: |
+          npm ci
+          npx playwright-core install --with-deps chromium
+      - name: Run the browser tests
+        run: npm test

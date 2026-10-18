@@ -1,68 +1,149 @@
-/* Real WebXR events on an emulated Quest: gestures, wrist UI, keyboard, model marks, desktop handoff. */
-const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright');
+/* Real WebXR on an emulated Meta Quest 3 (IWER), with controllers and with tracked hands: gripping and scaling the
+ * model, the watch's pie menu in both modes (tapped with a fingertip, or a controller's dot), the keyboard, marking the
+ * model with the laser, the right wrist's Annotate and Submit button, Exit's confirmation, and the desktop following.
+ * Run with `npm test -- vr`, or against a running server with EDITOR_VR_URL.
+ */
+const {chromium}=require(process.env.EDITOR_VR_PLAYWRIGHT||'playwright-core');
 const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');
 const url=process.env.EDITOR_VR_URL||'http://127.0.0.1:8021';
 const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js');
+const output=path.resolve(__dirname,'../test-results');
+
 (async()=>{const browser=await chromium.launch({headless:true,executablePath:process.env.EDITOR_VR_CHROMIUM||undefined,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});try{
- const desktop=await browser.newPage({viewport:{width:1450,height:1000}}),errors=[];desktop.on('pageerror',e=>errors.push(e.message));await desktop.goto(url);await desktop.waitForFunction(()=>editor?.ready);
- for(const input of ['controller','hand']){
+ await fs.mkdir(output,{recursive:true});
+ const desktop=await browser.newPage({viewport:{width:1450,height:1000}}),errors=[];desktop.on('pageerror',e=>errors.push(e.message));await desktop.goto(url+'/?full');await desktop.waitForFunction(()=>editor?.ready);
+ for(const input of (process.env.EDITOR_VR_INPUTS||'controller,hand').split(',')){
   const page=await browser.newPage({viewport:{width:1400,height:1000}});page.on('pageerror',e=>errors.push(input+': '+e.message));
   await page.addInitScript({content:`${await fs.readFile(iwer,'utf8')}\nwindow.xrDevice=new IWER.XRDevice(IWER.metaQuest3);window.xrDevice.installRuntime({forceInstall:true});window.xrDevice.primaryInputMode='${input}';`});
-  await page.goto(url);await page.waitForFunction(()=>window.editor?.ready);await page.evaluate(async()=>{await editor.link.command('/api/demo',{});await editor.link.settings({mode:'inspect',description:''});});
+  await page.goto(url);await page.waitForFunction(()=>window.editor?.ready);
+  // IWER's Quest user agent gets the headset's simple page.
+  assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('headset-page')),true,'The headset gets the simple page');
+  assert.equal(await page.locator('.tool-rail').isVisible(),false,'without the desktop rails');
+  await page.evaluate(async()=>{await editor.link.command('/api/demo',{});await editor.link.settings({mode:'inspect',description:'',tool:'spray',color:'#ffb86b',category:'size',brush_radius_mm:6});});
   await page.waitForFunction(()=>editor.viewer.modelId===editor.link.state.model.id);
-  await page.locator('#enter-vr').click();await page.waitForFunction(()=>editor.xr.state.presenting);await page.waitForTimeout(350);
-  const state=()=>page.evaluate(()=>editor.xr.state),frames=()=>page.waitForTimeout(180);
-  const place=async(side,position,quaternion=[0,0,0,1])=>{await page.evaluate(({side,position,quaternion,input})=>{const source=input==='hand'?xrDevice.hands[side]:xrDevice.controllers[side];source.position.set(...position);source.quaternion.set(...quaternion);},{side,position,quaternion,input});await frames();};
-  const press=async(side,value)=>{await page.evaluate(({side,value,input})=>{if(input==='hand')xrDevice.hands[side].updatePinchValue(value);else xrDevice.controllers[side].updateButtonValue('trigger',value);},{side,value,input});await frames();};
-  await place('left',[-.2,1.25,-.35]);await place('right',[.22,1.25,-.35]);
-  if(input==='hand'){await page.waitForFunction(()=>editor.xr.state.hands.filter(h=>h.tracked&&h.model).length===2,null,{timeout:15000});}
+  await page.locator('#enter-vr').click();await page.waitForFunction(()=>editor.vr.presenting);await page.waitForTimeout(350);
+  const state=()=>page.evaluate(()=>editor.vr.state),frames=(n=1)=>page.waitForTimeout(90*n);
+  const source=(side)=>input==='hand'?`xrDevice.hands.${side}`:`xrDevice.controllers.${side}`;
+  const place=async(side,position,quaternion=[0,0,0,1])=>{await page.evaluate(({side,position,quaternion,input})=>{const s=input==='hand'?xrDevice.hands[side]:xrDevice.controllers[side];s.position.set(...position);s.quaternion.set(...quaternion);},{side,position,quaternion,input});await frames(2);};
+  const press=async(side,value)=>{await page.evaluate(({side,value,input})=>{if(input==='hand')xrDevice.hands[side].updatePinchValue(value);else xrDevice.controllers[side].updateButtonValue('trigger',value);},{side,value,input});await frames(2);};
+  const rest={left:[-.15,1.2,-.3],right:[.3,1.1,-.1]};
+  const atRest=async()=>{await place('left',rest.left);await place('right',rest.right);await frames(3);};
+  await atRest();
+  if(input==='hand')await page.waitForFunction(()=>editor.vr.state.hands.filter(h=>h.tracked&&h.model).length===2,null,{timeout:15000});
+
+  // A fingertip tap (a controller's dot, or the index fingertip) on a region of the watch, pie, keyboard, or wrist
+  // button: from 8 cm in front, onto it until VR has seen the touch, and away again.
+  async function tap(id,side='right'){
+   const point=await page.evaluate(id=>editor.vr.regionPoint(id),id);
+   assert.ok(point,`${id} is on show: ${JSON.stringify((await state()).watch.regions)}`);
+   const index=(await state()).hands.findIndex(h=>h.side===side),presses=(await state()).hands[index].presses;
+   let offset=[0,0,.06];   // a controller's dot is 6 cm in front of it
+   if(input==='hand'){const s=await state(),tip=s.hands[index].indexTip,at=await page.evaluate(side=>{const p=xrDevice.hands[side].position;return [p.x,p.y,p.z];},side);offset=at.map((v,i)=>v-tip[i]);}
+   const at=point.map((v,i)=>v+offset[i]);
+   await place(side,[at[0],at[1],at[2]+.08]);
+   await place(side,at);
+   await page.waitForFunction(([i,n])=>editor.vr.state.hands[i].presses>n,[index,presses],{timeout:3000}).catch(async()=>{throw new Error(`${id} was not pressed: ${JSON.stringify({point,at,state:await state()})}`);});
+   await place(side,[at[0],at[1],at[2]+.1]);await place(side,rest[side]);await frames(2);
+  }
+
+  // Inspect: one hand grips and moves the model; two scale and turn it.
   const before=(await state()).transform.position;
-  await press('right',1);assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
-  await place('right',[.32,1.25,-.35]);const moved=(await state()).transform.position;assert.ok(Math.abs(moved[0]-before[0])>.06,'One-hand grabbing must move the model');await press('right',0);
+  await place('right',[.22,1.25,-.35]);await press('right',1);assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
+  await place('right',[.32,1.25,-.35]);assert.ok(Math.abs((await state()).transform.position[0]-before[0])>.06,'One-hand gripping moves the model');await press('right',0);
   await place('left',[-.13,1.25,-.35]);await place('right',[.13,1.25,-.35]);
   await press('left',1);await press('right',1);const small=(await state()).transform.scale;
-  await place('left',[-.23,1.25,-.35]);await place('right',[.23,1.25,-.35]);assert.ok((await state()).transform.scale>small*1.4,'Two hands must scale the model');
-  const rotationBefore=(await state()).transform.quaternion;
+  await place('left',[-.23,1.25,-.35]);await place('right',[.23,1.25,-.35]);assert.ok((await state()).transform.scale>small*1.4,'Two hands scale the model');
+  const turnedFrom=(await state()).transform.quaternion;
   await place('left',[0,1.25,-.12]);await place('right',[0,1.25,-.58]);
-  const rotationAfter=(await state()).transform.quaternion;
-  assert.ok(Math.abs(rotationAfter.reduce((sum,q,i)=>sum+q*rotationBefore[i],0))<.9,'Turning the hand pair must rotate the model');
-  await press('left',0);await press('right',0);await page.evaluate(()=>editor.fit());await frames();
-  // Aim using the panel's actual world transform and region rectangles.
-  async function tap(panel,id){
-   await page.evaluate(async({panel,id,input})=>{const THREE=await import('three'),state=editor.xr.state.ui[panel],r=state.regions.find(r=>r.id===id);if(!r)throw new Error('No UI region '+id);const matrix=new THREE.Matrix4().fromArray(state.matrix);const target=new THREE.Vector3(((r.x+r.w/2)/state.canvas[0]-.5)*state.width,(.5-(r.y+r.h/2)/state.canvas[1])*state.height,0).applyMatrix4(matrix);const origin=target.clone().addScaledVector(new THREE.Vector3(0,0,1).transformDirection(matrix),panel==='watch'?.12:.32);const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,-1),target.clone().sub(origin).normalize());const source=input==='hand'?xrDevice.hands.right:xrDevice.controllers.right;source.position.set(origin.x,origin.y,origin.z);source.quaternion.set(q.x,q.y,q.z,q.w);},{panel,id,input});
-   await frames();await press('right',1);await press('right',0);await page.evaluate(()=>editor.link.pending);
-  }
-  // The pie menu: Tools ▸ a tool closes it; Mark style ▸ Color / Category return to Mark style; Back climbs one ring.
-  await tap('watch','watch-menu');assert.equal((await state()).ui.radial.visible,true);assert.equal((await state()).ui.menu,'root');
-  await tap('radial','radial-root-tools');assert.equal((await state()).ui.menu,'tools');
-  await tap('radial','radial-tools-pin');await page.waitForFunction(()=>editor.link.state.settings.tool==='pin'&&editor.link.state.settings.mode==='edit');assert.equal((await state()).ui.radial.visible,false);
-  await tap('watch','watch-menu');await tap('radial','radial-root-style');await tap('radial','radial-style-color');await tap('radial','radial-color-2');
-  await page.waitForFunction(()=>editor.link.state.settings.color==='#ad9bff');assert.equal((await state()).ui.menu,'style');
-  await tap('radial','radial-style-category');await tap('radial','radial-category-general');await page.waitForFunction(()=>editor.link.state.settings.category==='general');
-  const radius=await page.evaluate(()=>editor.link.state.settings.brush_radius_mm);await tap('radial','radial-style-brush');await tap('radial','radial-brush-+');
-  await page.waitForFunction(r=>editor.link.state.settings.brush_radius_mm===r+.5,radius);
-  await tap('radial','radial-center');assert.equal((await state()).ui.menu,'style');await tap('radial','radial-center');assert.equal((await state()).ui.menu,'root');
-  await tap('radial','radial-root-note');assert.equal((await state()).ui.radial.visible,false);assert.equal((await state()).ui.panel.visible,true);assert.equal((await state()).ui.page,'instruction');
-  for(const key of 'smooth')await tap('panel','key-'+key);
-  await page.waitForFunction(()=>editor.link.state.settings.description==='smooth');
+  assert.ok(Math.abs((await state()).transform.quaternion.reduce((sum,q,i)=>sum+q*turnedFrom[i],0))<.9,'Turning the hand pair turns the model');
+  await press('left',0);await press('right',0);await page.evaluate(()=>editor.fit());await atRest();
+  assert.equal((await state()).lasers.some(l=>l.shown),false,'No laser in Inspect');
+
+  // The watch on the left wrist opens Inspect's pie: the room, Reset view, Annotate, Settings.
+  assert.ok((await state()).watch.face,'The watch is on the left wrist');
+  await tap('watch:face');
+  let s=await state();
+  assert.equal(s.watch.menu,'inspect');
+  assert.deepEqual(s.watch.regions.radial,['radial:inspect:background','radial:inspect:reset','radial:inspect:annotate','radial:inspect:settings','radial:center']);
+  await tap('radial:inspect:background');await tap('radial:background:lake');
+  await page.waitForFunction(()=>editor.vr.state.backgroundShown==='lake.jpg');
+  await page.waitForTimeout(400);await page.screenshot({path:path.join(output,`vr-${input}-lake.png`)});
+  await tap('radial:background:studio');assert.equal((await state()).backgroundShown,'studio');
+  await tap('radial:center');assert.equal((await state()).watch.menu,'inspect','Back one ring');
+  await tap('radial:center');assert.equal((await state()).watch.menu,null,'Close');
+
+  // The right wrist's button: Annotate ▸, tapped with the other hand.
+  assert.equal((await state()).watch.buttonLabel,'Annotate ▸');
+  await tap('wrist:button','left');
+  await page.waitForFunction(()=>editor.link.state.settings.mode==='edit');
+  await page.waitForFunction(()=>editor.vr.state.watch.buttonLabel==='Submit · 0');
+  await desktop.waitForFunction(()=>document.getElementById('view-badge').textContent!=='INSPECT MODE');
+
+  // Annotate's pie: Tools ▸ a tool closes it; Mark style ▸ Color and Category return to Mark style; Brush steps.
+  await tap('watch:face');
+  s=await state();assert.equal(s.watch.menu,'annotate');
+  assert.deepEqual(s.watch.regions.radial,['radial:annotate:tools','radial:annotate:style','radial:annotate:note','radial:annotate:undo','radial:annotate:submit','radial:annotate:settings','radial:center']);
+  await tap('radial:annotate:tools');await tap('radial:tools:pin');
+  await page.waitForFunction(()=>editor.link.state.settings.tool==='pin');assert.equal((await state()).watch.menu,null,'Choosing a tool closes the menu');
+  await tap('watch:face');await tap('radial:annotate:style');await tap('radial:style:color');await tap('radial:color:2');
+  await page.waitForFunction(()=>editor.link.state.settings.color==='#ad9bff');assert.equal((await state()).watch.menu,'style');
+  await tap('radial:style:category');await tap('radial:category:general');await page.waitForFunction(()=>editor.link.state.settings.category==='general');
+  await tap('radial:style:brush');assert.deepEqual((await state()).watch.path,['annotate','style','brush']);
+  await tap('radial:brush:+');await page.waitForFunction(()=>editor.link.state.settings.brush_radius_mm===6.5);
+  await page.waitForTimeout(300);await page.screenshot({path:path.join(output,`vr-${input}-pie.png`)});
+  await tap('radial:center');await tap('radial:center');assert.equal((await state()).watch.menu,'annotate');
+  // Note: the keyboard; Done saves the note to the shared workspace (the computer's page shows it).
+  await tap('radial:annotate:note');
+  s=await state();assert.equal(s.watch.keyboard,'description');assert.equal(s.watch.menu,null);
+  for(const key of 'smooth')await tap('key:'+key);
+  assert.equal((await state()).watch.text,'smooth');
+  await page.waitForTimeout(200);await page.screenshot({path:path.join(output,`vr-${input}-keyboard.png`)});
+  await tap('key:done');
   await desktop.waitForFunction(()=>document.getElementById('description').value==='smooth');
-  await tap('panel','close');
-  // Point at the model's front surface and select through the actual ray.
-  await page.evaluate(async input=>{const THREE=await import('three'),v=editor.viewer,b=v.mesh.geometry.boundingBox;const target=v.world(new THREE.Vector3(0,b.min.y,(b.min.z+b.max.z)/2));const source=input==='hand'?xrDevice.hands.right:xrDevice.controllers.right;source.position.set(target.x,target.y,target.z+.35);source.quaternion.set(0,0,0,1);},input);
-  await frames();await press('right',1);await press('right',0);
+  assert.equal((await state()).watch.keyboard,null,'Done puts the keyboard away');
+
+  // Marking: the laser shows in Annotate; point it at the model's front and pinch (the trigger) to pin a note.
+  await page.evaluate(async input=>{const THREE=await import('three'),v=editor.viewer,b=v.mesh.geometry.boundingBox;const target=v.world(new THREE.Vector3(0,b.min.y,(b.min.z+b.max.z)/2));const s=input==='hand'?xrDevice.hands.right:xrDevice.controllers.right;s.position.set(target.x,target.y,target.z+.35);s.quaternion.set(0,0,0,1);},input);
+  await frames(3);
+  s=await state();assert.ok(s.lasers.some(l=>l.side==='right'&&l.shown&&l.onModel),`The laser lands on the model: ${JSON.stringify(s.lasers)}`);
+  await press('right',1);await press('right',0);
   await page.waitForFunction(()=>editor.link.state.annotations.length===1);
-  assert.equal(await page.evaluate(()=>editor.link.state.annotations[0].color),'#ad9bff');
-  const previousRequests=await page.evaluate(()=>editor.link.state.requests.length);await tap('watch','watch-submit');await page.waitForFunction(count=>editor.link.state.requests.length===count+1,previousRequests);
-  const requestID=await page.evaluate(()=>editor.link.state.requests[0].id);await desktop.waitForFunction(id=>editor.link.state.requests.some(r=>r.id===id),requestID);
-  const packet=await page.evaluate(()=>editor.link.state.requests.find(r=>r.description==='smooth').packet_url);assert.equal((await desktop.request.get(url+packet)).status(),200);
-  const folder=path.resolve(__dirname,'../test-results');await fs.mkdir(folder,{recursive:true});await page.waitForTimeout(500);
-  if(input==='hand'){
-    const sizes=await page.evaluate(async()=>{const THREE=await import('three');return editor.xr.hands.map(hand=>{const skin=hand.hand.getObjectByProperty('type','SkinnedMesh');skin.computeBoundingBox();return {size:skin.boundingBox.getSize(new THREE.Vector3()).length(),dots:Object.values(hand.hand.joints).filter(j=>j.userData.editorDot?.visible).length};});});
-    for(const hand of sizes){assert.ok(hand.size<.6,'Tracked hand mesh must remain hand-sized');assert.equal(hand.dots,0,'Fallback dots hide after the hand skin is ready');}
+  const mark=await page.evaluate(()=>editor.link.state.annotations[0]);
+  assert.equal(mark.tool,'pin');assert.equal(mark.color,'#ad9bff');assert.equal(mark.category,'general');
+  if(input==='controller') {
+    // In Annotate the grip button still moves the model (with hands, a fist does).
+    const from=(await state()).transform.position;
+    await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',1));await frames(2);
+    assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
+    await place('right',[.3,1.2,-.3]);assert.ok(Math.abs((await state()).transform.position[0]-from[0])>.05,'The grip button moves the model in Annotate');
+    await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',0));await frames(2);
+    await page.evaluate(()=>editor.fit());
   }
-  await tap('watch','watch-menu');await tap('radial','radial-root-style');await place('right',[.3,1.12,-.4]);await frames();
-  await page.screenshot({path:path.join(folder,'vr-'+input+'.png')});
-  await page.evaluate(()=>editor.xr.session.end());await page.waitForFunction(()=>!editor.xr.state.presenting);await page.close();
+  await atRest();
+
+  // Submit, on the right wrist: the request reaches the computer.
+  await page.waitForFunction(()=>editor.vr.state.watch.buttonLabel==='Submit · 1');
+  const requestsBefore=await page.evaluate(()=>editor.link.state.requests.length);
+  await tap('wrist:button','left');
+  await page.waitForFunction(count=>editor.link.state.requests.length===count+1,requestsBefore);
+  await desktop.waitForFunction(count=>editor.link.state.requests.length===count+1,requestsBefore);
+  const request=await page.evaluate(()=>editor.link.state.requests[0]);
+  assert.equal(request.description,'smooth');assert.equal((await desktop.request.get(url+request.packet_url)).status(),200);
+  await page.waitForFunction(()=>/Sent 1 mark/.test(editor.vr.state.watch.caption||''));
+
+  if(input==='hand') {
+    const sizes=await page.evaluate(async()=>{const THREE=await import('three');return editor.vr.hands.map(hand=>{const skin=hand.xrHand.getObjectByProperty('type','SkinnedMesh');skin.computeBoundingBox();return {size:skin.boundingBox.getSize(new THREE.Vector3()).length(),dots:Object.values(hand.xrHand.joints).filter(j=>j.userData.dot?.visible).length};});});
+    for(const hand of sizes){assert.ok(hand.size<.6,'Tracked hand mesh stays hand-sized');assert.equal(hand.dots,0,'Joint dots hide once the hand model is ready');}
+  }
+
+  // Exit VR asks first: Settings ▸ Exit VR ▸ Stay goes back; Yes, exit leaves.
+  await tap('watch:face');await tap('radial:annotate:settings');await tap('radial:settings:exit');
+  assert.equal((await state()).watch.menu,'exit');
+  await tap('radial:exit:stay');assert.equal((await state()).watch.menu,'settings');assert.equal(await page.evaluate(()=>editor.vr.presenting),true);
+  await tap('radial:settings:exit');await tap('radial:exit:confirm');
+  await page.waitForFunction(()=>!editor.vr.presenting);
+  assert.equal(await page.evaluate(()=>editor.vr.state.backgroundShown),'studio','Leaving VR puts the studio back');
+  await page.close();
  }
- assert.deepEqual(errors,[]);console.log('Quest controller and tracked-hand movement, two-hand scaling, wrist pie menu, in-world keyboard, surface selection, wrist submission, and desktop synchronization passed.');
+ assert.deepEqual(errors,[]);console.log('Quest controller and tracked-hand gripping and scaling, the watch pie in Inspect and Annotate, backgrounds, keyboard, laser marking, wrist Annotate and Submit, Exit confirmation, and desktop following passed.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
