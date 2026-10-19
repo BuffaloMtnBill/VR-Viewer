@@ -55,3 +55,15 @@ def test_default_port_is_8000(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["editor-vr", "--local", "--no-browser", "--data-dir", str(tmp_path)])
     cli.main()
     assert run.call_args.kwargs["port"] == 8000
+
+
+def test_connections_left_by_a_closed_server_do_not_block():
+    """A server that has just stopped leaves TIME-WAIT connections on its port for a minute; the port is free."""
+    import socket
+    with socket.socket() as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0)); server.listen(); port = server.getsockname()[1]
+        client = socket.create_connection(("127.0.0.1", port)); accepted, _ = server.accept()
+        accepted.close()   # the server's side closes first, so the TIME-WAIT is on its port
+        client.close()
+    assert not cli.port_in_use("127.0.0.1", port) and not cli.port_in_use("0.0.0.0", port)

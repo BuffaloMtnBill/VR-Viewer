@@ -26,9 +26,15 @@ def port_in_use(host,port):
         try:
             with socket.create_connection((address,port),timeout=.5):return True
         except OSError:pass
+    # Bind as the server will. On Linux and macOS, SO_REUSEADDR lets the connections a stopped server leaves behind
+    # (TIME-WAIT, for about a minute) through, and still refuses a running one; on Windows it would let a second
+    # server share the port, so there the port is asked for exclusively.
     family=socket.AF_INET6 if ':' in host else socket.AF_INET
     try:
-        with socket.socket(family,socket.SOCK_STREAM) as probe:probe.bind((host,port))
+        with socket.socket(family,socket.SOCK_STREAM) as probe:
+            if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):probe.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+            else:probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            probe.bind((host,port))
     except OSError:return True
     return False
 
