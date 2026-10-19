@@ -22,7 +22,7 @@ py -3 -m venv .venv
 .venv\Scripts\python app.py
 ```
 
-The default is **HTTPS on port 8020**, listening on the local network. The server prints the desktop URL, LAN addresses and a six-digit pairing PIN. The desktop browser opens automatically. `--no-browser` suppresses that launch; `--port 8025` selects another port; `--models DIR` picks the folder of model projects (default `~/Projects/Models`).
+The default is **HTTPS on port 8000** (the same port as 3D-VR-Terrain, so one firewall rule serves both; run one at a time), listening on the local network. The server prints the desktop URL, LAN addresses and a six-digit pairing PIN. The desktop browser opens automatically. `--no-browser` suppresses that launch; `--port 8025` selects another port; `--models DIR` picks the folder of model projects (default `~/Projects/Models`). If the port is already in use (3D-VR-Terrain, another Editor-VR, or any other program), the server says so and does not start; stop the other server or choose another port.
 
 ```bash
 python app.py --no-browser
@@ -33,8 +33,8 @@ python app.py --local --port 8021 --no-browser
 
 ## Connect a Quest
 
-1. Put the computer and headset on the same network. Allow inbound TCP 8020 on the computer's private-network firewall if necessary. Guest Wi-Fi often isolates devices.
-2. Open the printed `https://<computer LAN address>:8020` in Quest Browser. Accept the self-signed local certificate warning. On the desktop, **Connect headset** shows the address and PIN.
+1. Put the computer and headset on the same network. Allow inbound TCP 8000 on the computer's private-network firewall if necessary. Guest Wi-Fi often isolates devices.
+2. Open the printed `https://<computer LAN address>:8000` in Quest Browser. Accept the self-signed local certificate warning. On the desktop, **Connect headset** shows the address and PIN.
 3. Enter the six-digit PIN on the headset's pairing page. Choose **Enter VR** after the model loads, and allow immersive VR/hand-tracking permissions if requested.
 4. Keep the desktop page open. Tool settings, annotations, model transforms and queued requests update on both devices.
 

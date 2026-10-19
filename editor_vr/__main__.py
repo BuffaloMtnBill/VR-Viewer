@@ -19,9 +19,23 @@ def open_when_ready(url,port):
     webbrowser.open(url)
 
 
+def port_in_use(host,port):
+    """Whether another program already has this port: listening on this computer (on any address), or holding the
+    address this server would bind. A server on the same port would otherwise answer some of its requests."""
+    for address in ('127.0.0.1','::1'):
+        try:
+            with socket.create_connection((address,port),timeout=.5):return True
+        except OSError:pass
+    family=socket.AF_INET6 if ':' in host else socket.AF_INET
+    try:
+        with socket.socket(family,socket.SOCK_STREAM) as probe:probe.bind((host,port))
+    except OSError:return True
+    return False
+
+
 def main():
     parser=argparse.ArgumentParser(description='Editor-VR: shared desktop and Quest model annotation')
-    parser.add_argument('--port',type=int,default=8020)
+    parser.add_argument('--port',type=int,default=8000)
     parser.add_argument('--host',help='Listen address; defaults to all interfaces for the headset')
     parser.add_argument('--local',action='store_true',help='Desktop-only HTTP on loopback')
     parser.add_argument('--no-browser',action='store_true')
@@ -30,15 +44,20 @@ def main():
     parser.add_argument('--forget-devices',action='store_true')
     args=parser.parse_args()
     if not 1024<=args.port<=65535:parser.error('Port must be 1024–65535.')
-    app=create_app(args.data_dir,models_dir=args.models)
     host=args.host or ('127.0.0.1' if args.local else '0.0.0.0')
-    ssl_context=None; pairing=None
     if args.local:
         # No pairing or TLS here, so never on the network; localhost is pinned to its address rather than resolved.
         if host=='localhost':host='127.0.0.1'
         try:loopback=ipaddress.ip_address(host).is_loopback
         except ValueError:loopback=False
         if not loopback:parser.error('--local must listen on a loopback address. Use default HTTPS for the network.')
+    # Another server on this port (3D-VR-Terrain shares 8000): do not start alongside it.
+    if port_in_use(host,args.port):
+        parser.exit(1,f'Port {args.port} is already in use (perhaps by 3D-VR-Terrain or another Editor-VR). '
+            f'Stop that server, or start this one with --port <another port>.\n')
+    app=create_app(args.data_dir,models_dir=args.models)
+    ssl_context=None; pairing=None
+    if args.local:
         url=f'http://[{host}]:{args.port}' if ':' in host else f'http://{host}:{args.port}'
     else:
         import os
