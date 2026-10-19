@@ -127,6 +127,15 @@ def test_added_parts_stand_beside_the_scene_and_parts_can_be_removed(tmp_path):
         w.action({'type': 'remove_object', 'object_id': state['scene']['objects'][0]['id']})
 
 
+def test_a_monolithic_model_opens_for_viewing_with_its_part_selected(tmp_path):
+    w = Workspace(tmp_path)
+    v, f = cube(20)
+    state = w.open_scene([mesh.part_record('Trophy', v, f)], 'Trophy')
+    assert state['stage'] == 'scene' and state['selected'] == state['scene']['objects'][0]['id'], 'View mode, ready to Edit'
+    state = w.open_scene([mesh.part_record('A', v, f), mesh.part_record('B', *cube(5, (30, 0, 0)))], 'Two')
+    assert state['stage'] == 'scene' and state['selected'] is None, 'With several parts, you choose'
+
+
 def test_a_part_can_be_colored_on_every_device_and_put_back_to_gray(tmp_path):
     w = Workspace(tmp_path)
     vessel, stand = w.snapshot()['scene']['objects']

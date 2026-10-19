@@ -25,17 +25,24 @@ export function createAnnotate({scene,viewer,tools,link}) {
   }
   // Every frame for each hand: aim, and show the laser (or hide it, when `shown` is false). Returns the model hit
   // (in the scene, with the part's objectId). `color` overrides the mark's color (the scene's selecting laser).
-  function aim(hand,shown,color=null) {
+  // `panel(ray)` is a button floating in the room (the selected part's card): nearer than the model, it stops the laser
+  // there and is kept as hand.panel, to be pressed by a pinch.
+  function aim(hand,shown,color=null,panel=null) {
     const laser=laserOf(hand);
-    if(!shown){laser.line.visible=false;laser.spot.visible=false;hand.hit=null;return null;}
-    const ray=rayOf(hand),hit=viewer.hit(ray);
-    laser.line.visible=true;laser.line.scale.z=hit?.distance||1.5;
+    if(!shown){laser.line.visible=false;laser.spot.visible=false;hand.hit=null;hand.panel=null;return null;}
+    const ray=rayOf(hand),hit=viewer.hit(ray),button=panel?.(ray)||null;
+    hand.panel=button&&(!hit||button.distance<hit.distance)?button:null;hand.ray=ray;
+    laser.line.visible=true;
+    if(hand.panel) {
+      laser.line.scale.z=hand.panel.distance;laser.line.material.color.set('#ffffff');
+      laser.spot.visible=true;laser.spot.position.copy(hand.panel.point);hand.hit=null;return null;
+    }
+    laser.line.scale.z=hit?.distance||1.5;
     laser.line.material.color.set(hit?color||link.state.settings.color:'#7f9bae');
     laser.spot.visible=Boolean(hit);if(hit)laser.spot.position.copy(hit.point);
-    hand.hit=hit;hand.ray=ray;
+    hand.hit=hit;
     return hit;
   }
-  // A pinch on the model: the tool starts there. 'paint' while a stroke or region is being drawn, else 'tool'.
   function begin(hand) {
     if(!hand.hit||!tools.begin(hand.hit,hand.ray))return null;
     return tools.active?'paint':'tool';

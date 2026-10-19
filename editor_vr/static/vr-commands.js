@@ -37,7 +37,11 @@ export const COMMANDS=[
   {name:'inspect',label:'Inspect mode',pattern:/\b(inspect|move) mode\b|\bswitch to inspect\b/},
   {name:'annotate',label:'Annotate mode',pattern:/\bannotate mode\b|\bswitch to annotate\b|\bstart annotating\b/},
   {name:'reset',label:'Reset view',pattern:/\breset( the)? view\b/},
-  {name:'edit-part',label:'Edit part',pattern:/\bedit( this| the| that)? (part|object)\b/},
+  {name:'stats',label:'Show stats',pattern:/\b(?:(show|hide)(?: me)?(?: the)?(?: part)? )?(?:part )?(?:stats|statistics|info|details)\b/},
+  {name:'unselect',label:'Unselect',pattern:/\b(unselect|deselect)( it| this| the part)?\b|\bclear( the)? selection\b|\bselect nothing\b/},
+  {name:'paint',label:'Make it blue',pattern:/\b(?:make|paint|color|colour) (?:it|this|the part) (gray|grey|red|orange|yellow|green|blue)\b/},
+  {name:'part-color',label:'Change color',pattern:/\b(change|set)( the)?( part)? colou?r\b|\bpart colou?r\b/},
+  {name:'edit-part',label:'Edit part',pattern:/^edit( it| this| that)?$|\bedit( this| the| that)? (part|object)\b/},
   {name:'scene',label:'Back to scene',pattern:/\bback to( the)? scene\b|\bshow( me)?( the)?( whole)? scene\b/},
   {name:'exit',label:'Exit program',pattern:/\b(exit|quit|close)( the)? (program|vr)\b/},
 ];
@@ -45,7 +49,8 @@ const TOOL_WORDS={spray:'spray','spray paint':'spray',region:'box',box:'box','3d
 export function matchCommand(text) {
   const heard=words(text);
   for(const command of COMMANDS){const found=heard.match(command.pattern);if(!found)continue;
-    return {...command,menu:command.name==='open-named'?found[1]:null,tool:command.name==='tool'?TOOL_WORDS[found[1]||found[3]]:null};}
+    return {...command,menu:command.name==='open-named'?found[1]:null,tool:command.name==='tool'?TOOL_WORDS[found[1]||found[3]]:null,
+      show:command.name==='stats'&&found[1]?found[1]==='show':null,color:command.name==='paint'?found[1]:null};}
   return null;
 }
 

@@ -78,18 +78,38 @@ const output=path.resolve(__dirname,'../test-results');
   assert.ok((await state()).watch.face,'The watch is on the left wrist');
   await tap('watch:face');
   s=await state();assert.equal(s.watch.menu,'scene');
-  assert.deepEqual(s.watch.regions.radial,['radial:scene:parts','radial:scene:add','radial:scene:edit','radial:scene:color','radial:scene:reset','radial:scene:settings','radial:center'],'Part color appears with a part selected');
+  assert.deepEqual(s.watch.regions.radial,['radial:scene:parts','radial:scene:add','radial:scene:edit','radial:scene:part','radial:scene:reset','radial:scene:settings','radial:center'],'Part ▸ appears with a part selected');
   await tap('radial:scene:add');assert.deepEqual((await state()).watch.regions.radial,['radial:add:0:upload','radial:center'],'Without a project, Add points to the computer');
   await tap('radial:center');
-  // Part color ▸ paints the selected part, on every device; Gray puts it back.
-  await tap('radial:scene:color');
+  // The selected part has a card floating above it: its name and Edit ▸.
+  s=await state();assert.equal(s.watch.card?.part,vessel,'A card floats above the selected part');assert.deepEqual(s.watch.regions.card,['card:edit']);
+  assert.equal(s.watch.card.stats,null);
+  const top=await page.evaluate(async id=>{const THREE=await import('three'),m=[...editor.viewer.meshes.values()].find(m=>m.userData.objectId===id);return new THREE.Box3().setFromObject(m).max.y;},vessel);
+  assert.ok(s.watch.card.position[1]>top,'above it');
+  // Part ▸: Edit part, Stats, Color ▸, Unselect.
+  await tap('radial:scene:part');
+  assert.deepEqual((await state()).watch.regions.radial,['radial:part:edit','radial:part:stats','radial:part:color','radial:part:unselect','radial:center']);
+  await tap('radial:part:stats');
+  assert.deepEqual((await state()).watch.card.stats,['Triangles','Size','Mesh','Marks','Category'],'Stats show on the card');
+  await page.waitForTimeout(300);await page.screenshot({path:path.join(output,`vr-${input}-card.png`)});
+  // Color ▸ paints the selected part, on every device; Gray puts it back.
+  await tap('radial:part:color');
   assert.deepEqual((await state()).watch.regions.radial,['radial:part-color:gray','radial:part-color:red','radial:part-color:orange','radial:part-color:yellow','radial:part-color:green','radial:part-color:blue','radial:center']);
   await tap('radial:part-color:blue');
   await desktop.waitForFunction(id=>editor.link.state.scene.objects.find(o=>o.id===id).color==='#3a7bd5',vessel);
   await page.waitForFunction(id=>{const m=[...editor.viewer.meshes.values()].find(m=>m.userData.objectId===id),c=m.geometry.attributes.color.array;return c[2]>c[0]*2;},vessel);
-  assert.equal((await state()).watch.menu,'scene','Choosing a color goes back to the scene ring');
-  await tap('radial:scene:color');await tap('radial:part-color:gray');
+  assert.equal((await state()).watch.menu,'part','Choosing a color goes back to Part');
+  await tap('radial:part:color');await tap('radial:part-color:gray');
   await desktop.waitForFunction(id=>!('color' in editor.link.state.scene.objects.find(o=>o.id===id)),vessel);
+  await tap('radial:part:stats');assert.equal((await state()).watch.card.stats,null,'Hide stats');
+  // Unselect: the card goes, and the menu is back on the scene's ring.
+  await tap('radial:part:unselect');
+  await page.waitForFunction(()=>editor.link.state.selected===null&&editor.vr.state.watch.card===null);
+  assert.equal((await state()).watch.menu,'scene');
+  await tap('radial:center');
+  await aimAt('right','Fluted vessel');await frames(3);await press('right',1);await press('right',0);
+  await page.waitForFunction(id=>editor.link.state.selected===id&&editor.vr.state.watch.card?.part===id,vessel);
+  await atRest();await tap('watch:face');
   // Settings ▸ Background: the room around the scene.
   await tap('radial:scene:settings');await tap('radial:settings:background');await tap('radial:background:lake');
   await page.waitForFunction(()=>editor.vr.state.backgroundShown==='lake.jpg');
@@ -118,16 +138,52 @@ const output=path.resolve(__dirname,'../test-results');
   await tap('radial:center');await tap('radial:center');assert.equal((await state()).watch.menu,'scene','Back one ring at a time');
   await tap('radial:center');assert.equal((await state()).watch.menu,null,'Close');
 
-  // The right wrist's Edit ▸ shows the selected part alone, in Inspect.
+  // Edit ▸ shows the selected part alone, in Inspect: with controllers, the card's, by laser and the trigger; with
+  // hands, the right wrist's, tapped.
   assert.equal((await state()).watch.buttonLabel,'Edit ▸');
-  await tap('wrist:button','left');
+  if(input==='controller') {
+    await page.waitForTimeout(400);   // the card ignores presses for a moment after it appears
+    const button=await page.evaluate(()=>editor.vr.regionPoint('card:edit'));
+    await place('right',[button[0],button[1],button[2]+.4]);await frames(3);
+    s=await state();assert.equal(s.hands.find(h=>h.side==='right').over??null,null);
+    assert.ok(s.lasers.some(l=>l.side==='right'&&l.shown),'The laser shows');
+    assert.equal(await page.evaluate(()=>editor.vr.hands.find(h=>h.source?.handedness==='right').panel?.id),'card:edit','The laser lands on Edit ▸');
+    await press('right',1);await press('right',0);
+  } else await tap('wrist:button','left');
   await page.waitForFunction(id=>editor.link.state.stage==='object'&&editor.link.state.model.object_id===id&&editor.viewer.stage==='object',vessel);
   assert.equal(await page.evaluate(()=>[...editor.viewer.meshes.values()].filter(m=>m.visible).length),1,'The part alone');
   assert.equal((await state()).lasers.some(l=>l.shown),false,'No laser in Inspect');
   // Inspect: one hand grips and turns the part.
   const partFrom=(await state()).transform.position;
   await place('right',[.22,1.25,-.35]);await press('right',1);await place('right',[.32,1.25,-.35]);
-  assert.ok(Math.abs((await state()).transform.position[0]-partFrom[0])>.06,'One hand moves the part');await press('right',0);await atRest();
+  assert.ok(Math.abs((await state()).transform.position[0]-partFrom[0])>.06,'One hand moves the part');
+  assert.deepEqual((await state()).transform.quaternion,[0,0,0,1],'Dragging moves it without turning it');await press('right',0);await atRest();
+  // A pinch on the part itself picks it up: it moves and turns with the hand, as if held.
+  const centre=async()=>page.evaluate(async()=>{const THREE=await import('three'),m=editor.viewer.mesh;m.geometry.computeBoundingBox();const c=m.geometry.boundingBox.getCenter(new THREE.Vector3());return m.localToWorld(c).toArray();});
+  await page.evaluate(()=>editor.fit());await frames(3);
+  const heldFrom=(await state()).transform,inside=await centre();
+  await place('right',inside);await press('right',1);
+  assert.equal((await state()).hands.find(h=>h.side==='right').mode,'hold','A pinch on the part holds it');
+  const quarter=[0,Math.sin(Math.PI/8),0,Math.cos(Math.PI/8)];   // 45° about the vertical
+  await place('right',[inside[0]+.1,inside[1]+.05,inside[2]],quarter);await frames(3);
+  let held=(await state()).transform;
+  assert.ok(held.position[0]-heldFrom.position[0]>.05&&held.position[1]-heldFrom.position[1]>.02,`The held part goes with the hand: ${JSON.stringify(held)}`);
+  assert.ok(Math.abs(held.quaternion[1])>.2,`and turns with it: ${JSON.stringify(held.quaternion)}`);
+  await press('right',0);await desktop.waitForFunction(q=>Math.abs(editor.link.state.transform.quaternion[1]-q)<1e-6,held.quaternion[1]);
+  await page.evaluate(()=>editor.fit());await atRest();
+  if(input==='controller') {
+    // A fist (the grip button) turns the part about its center, which stays put.
+    const spinFrom=(await state()).transform;
+    await place('right',[.25,1.2,-.3]);
+    await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',1));await frames(2);
+    assert.equal((await state()).hands.find(h=>h.side==='right').mode,'spin');
+    await place('right',[.3,1.25,-.3],quarter);await frames(2);
+    const spun=(await state()).transform;
+    assert.ok(Math.abs(spun.quaternion[1])>.2,'The fist turns the part');
+    assert.ok(spun.position.every((v,i)=>Math.abs(v-spinFrom.position[i])<1e-6),'about its center, which stays put');
+    await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',0));await frames(2);
+    await page.evaluate(()=>editor.fit());await atRest();
+  }
   await tap('watch:face');
   s=await state();assert.equal(s.watch.menu,'inspect');
   assert.deepEqual(s.watch.regions.radial,['radial:inspect:scene','radial:inspect:reset','radial:inspect:annotate','radial:inspect:settings','radial:center']);
@@ -171,11 +227,11 @@ const output=path.resolve(__dirname,'../test-results');
   const mark=await page.evaluate(()=>editor.link.state.annotations[0]);
   assert.equal(mark.tool,'pin');assert.equal(mark.color,'#ad9bff');assert.equal(mark.category,'general');
   if(input==='controller') {
-    // In Annotate the grip button still moves the model (with hands, a fist does).
-    const from=(await state()).transform.position;
+    // In Annotate a fist (the grip button) still turns the model; the pinch (trigger) marks.
     await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',1));await frames(2);
-    assert.equal((await state()).hands.find(h=>h.side==='right').mode,'grab');
-    await place('right',[.3,1.2,-.3]);assert.ok(Math.abs((await state()).transform.position[0]-from[0])>.05,'The grip button moves the model in Annotate');
+    assert.equal((await state()).hands.find(h=>h.side==='right').mode,'spin');
+    await place('right',[.3,1.2,-.3],[0,Math.sin(Math.PI/8),0,Math.cos(Math.PI/8)]);
+    assert.ok(Math.abs((await state()).transform.quaternion[1])>.2,'The grip button turns the model in Annotate');
     await page.evaluate(()=>xrDevice.controllers.right.updateButtonValue('squeeze',0));await frames(2);
     await page.evaluate(()=>editor.fit());
   }

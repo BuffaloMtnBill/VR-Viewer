@@ -4,7 +4,8 @@
 // goes back one ring. Tap the options the same way (there are no lasers at the menus). Note and Meaning open a
 // keyboard with a microphone key for dictation.
 // The right-wrist button: Edit ▸ (the selected part) in the scene; Annotate ▸ in Inspect; Submit (with the number of
-// marks) in Annotate.
+// marks) in Annotate. In the scene, a card floats above the selected part: its name and Edit ▸ (pressed with the laser
+// and a pinch, or a fingertip), and its stats when asked for (Part ▸ Stats, or "show stats").
 import * as THREE from 'three';
 import {TOOL_NAMES} from './tools.js';
 import {createVoice} from './vr-voice.js';
@@ -38,13 +39,13 @@ function wrapText(c,value,width,maxLines) {
   return lines.slice(0,maxLines);
 }
 
-export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,setStage,select,exit,submit,undo,fit,backgrounds,voiceCommands,api}) {
+export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,setStage,select,bounds,exit,submit,undo,fit,backgrounds,voiceCommands,api}) {
   const face=surface('watch',.045,.045,256),radial=surface('pie menu',.42,.42,1024),keyboard=surface('keyboard',.62,.34,1600);
-  const wrist=surface('wrist button',.075,.04,512),caption=surface('caption',.34,.05,870);
-  for(const s of [face,radial,keyboard,wrist,caption])scene.add(s.mesh);
-  face.mesh.renderOrder=1050;
-  const surfaces=[face,radial,keyboard,wrist];
-  let menu=null,stack=[],hovered=new Set(),field='description',text='',then=null,voiceNote='';
+  const wrist=surface('wrist button',.075,.04,512),caption=surface('caption',.34,.05,870),card=surface('part card',.3,.165,800);
+  for(const s of [face,radial,keyboard,wrist,caption,card])scene.add(s.mesh);
+  face.mesh.renderOrder=1050;card.mesh.renderOrder=1040;
+  const surfaces=[face,radial,keyboard,wrist,card];
+  let menu=null,stack=[],hovered=new Set(),field='description',text='',then=null,voiceNote='',statsShown=false;
   const settings=()=>link.state?.settings||{};
   const marks=()=>link.state?.annotations.length||0;
   const objects=()=>link.state?.scene.objects||[];
@@ -59,6 +60,23 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
     projectFiles={project,files:project?null:[]};
     if(project)api(`/api/projects/${encodeURIComponent(project)}`).then(detail=>{if(projectFiles.project===project){projectFiles.files=detail.parts;radial.signature='';}})
       .catch(()=>{projectFiles.files=[];radial.signature='';});
+  }
+  // The selected part's stats on its card: shown or hidden (they stay shown for the next part selected).
+  function showStats(shown=!statsShown) {
+    if(!selected()){say('Pick a part first: point at it and pinch');return;}
+    statsShown=shown;card.signature='';say(shown?`${selected().name} · stats`:'Stats hidden');
+  }
+  function unselect() {
+    if(!selected()){say('Nothing is selected');return;}
+    select(null);say('Nothing selected');
+    if(radial.mesh.visible){stack=[top()];menu=top();radial.signature='';}
+  }
+  // "Make it blue": a part color by name, for the selected part.
+  function paint(label) {
+    const item=selected(),choice=PART_COLORS.find(c=>c.label.toLowerCase()===String(label).toLowerCase().replace('grey','gray'));
+    if(!item){say('Pick a part first: point at it and pinch');return;}
+    if(!choice)return;
+    link.action({type:'part_color',object_id:item.id,color:choice.color}).catch(error=>say(error.message));say(`${item.name} · ${choice.label}`);
   }
   function editPart() {
     const item=selected();
@@ -89,8 +107,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       {key:'parts',label:'Parts',aliases:['select a part','parts list'],open:'parts:0',detail:selected()?shorten(selected().name,18):`${objects().length} parts`},
       {key:'add',label:'Add part',aliases:['add','add a part'],open:'add:0',detail:link.state?.scene.source?.project?shorten(link.state.scene.source.project,18):'From a project'},
       {key:'edit',label:'Edit part',aliases:['edit','edit this part'],detail:selected()?shorten(selected().name,18):'Pick one first',primary:Boolean(selected()),press:()=>editPart()},
-      ...selected()?[{key:'color',label:'Part color',aliases:['part colour','paint part','change color','recolor'],open:'part-color',
-        detail:partColor().label,swatch:partColor().fill||partColor().color}]:[],
+      ...selected()?[{key:'part',label:'Part',aliases:['this part','selected part','selection'],open:'part',detail:shorten(selected().name,18),swatch:partColor().fill||partColor().color}]:[],
       {key:'reset',label:'Reset view',press:()=>fit()},
       {key:'settings',label:'Settings',open:'settings',detail:voiceCommands.on?'Voice on':'Voice off'}]},
     inspect:{title:'Inspect',value:()=>shorten(link.state?.model.name||'',14),items:()=>[
@@ -116,6 +133,12 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       {key:'meaning',label:'Meaning',aliases:['color meaning'],detail:'Type or say it',press:()=>openKeyboard('meaning')}]},
     color:{title:'Mark color',items:()=>COLORS.map((color,i)=>({key:String(i),label:MEANINGS[i],fill:color,active:settings().color===color,
       press:()=>{set({color,meaning:MEANINGS[i]});back();}}))},
+    // The selected part: edit it, its stats, its color, or let it go.
+    part:{title:'Part',value:()=>shorten(selected()?.name||'',14),items:()=>[
+      {key:'edit',label:'Edit part',aliases:['edit','edit this part'],primary:true,press:()=>editPart()},
+      {key:'stats',label:statsShown?'Hide stats':'Stats',aliases:['stats','show stats','hide stats','statistics','part info','details'],active:statsShown,press:()=>showStats()},
+      {key:'color',label:'Color',aliases:['part color','part colour','change color','paint part','recolor'],open:'part-color',detail:partColor().label,swatch:partColor().fill||partColor().color},
+      {key:'unselect',label:'Unselect',aliases:['deselect','clear selection','select nothing'],press:()=>unselect()}]},
     'part-color':{title:'Part color',value:()=>shorten(selected()?.name||'',14),items:()=>PART_COLORS.map(choice=>({key:choice.label.toLowerCase(),label:choice.label,
       fill:choice.fill||choice.color,active:partColor().color===choice.color,press:()=>{const item=selected();if(!item)return;
         link.action({type:'part_color',object_id:item.id,color:choice.color}).catch(error=>say(error.message));say(`${item.name} · ${choice.label}`);back();}}))},
@@ -171,6 +194,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
   function openNamed(name) {
     const key={'mark style':'style',backgrounds:'background',parts:'parts:0',add:'add:0'}[name]||name;
     if(key==='background'){openMenu(['settings','background']);return true;}
+    if(key==='part-color'){if(stage()!=='scene'||!selected())return false;openMenu(['part','part-color']);return true;}
     if(['tools','style'].includes(key)){if(stage()!=='object')return false;if(mode()!=='edit')setMode('edit');}
     const root=['tools','style'].includes(key)?'annotate':top();
     if(!itemsOf(root).some(item=>item.open===key))return false;
@@ -296,6 +320,61 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
     wrist.texture.needsUpdate=true;
   }
 
+  // The card above the selected part, drawn from its bottom up: the name and Edit ▸, and the stats above them.
+  function statLines(item) {
+    const lines=[['Triangles',item.triangles.toLocaleString()+(item.source_triangles>item.triangles?` (of ${item.source_triangles.toLocaleString()})`:'')],
+      ['Size',`${item.dimensions_mm.map(d=>d.toFixed(1)).join(' × ')} mm`],['Mesh',item.watertight?'Closed (watertight)':'Has open edges'],
+      ['Marks',String(item.marks||0)]];
+    if(item.category)lines.push(['Category',title(item.category)]);
+    if(item.print_file)lines.push(['Print file',item.print_file.split('/').pop()]);
+    return lines.slice(0,5);
+  }
+  function drawCard() {
+    if(!card.mesh.visible)return;
+    const item=selected();if(!item)return;
+    const signature=JSON.stringify([item,statsShown,hovered.has('card:edit')]);if(signature===card.signature)return;card.signature=signature;
+    const c=card.context,W=card.canvas.width,H=card.canvas.height,band=150,top=H-band;
+    c.clearRect(0,0,W,H);card.regions=[];
+    if(statsShown) {
+      const lines=statLines(item),rowH=52,boxTop=top-16-lines.length*rowH-24;
+      c.fillStyle=UI.fill;c.beginPath();c.roundRect(0,boxTop,W,top-12-boxTop,26);c.fill();
+      c.textBaseline='middle';
+      lines.forEach(([label,value],k)=>{const y=boxTop+24+rowH*(k+.5);
+        c.textAlign='left';c.fillStyle=UI.muted;c.font=`500 34px ${UI.sans}`;c.fillText(label,28,y);
+        c.fillStyle=UI.ink;c.font=`600 38px ${UI.sans}`;c.fillText(wrapText(c,value,W-250,1)[0]||'',220,y);});
+    }
+    c.fillStyle=UI.fill;c.beginPath();c.roundRect(0,top,W,band,30);c.fill();c.lineWidth=5;c.strokeStyle=UI.accent;c.stroke();
+    c.textAlign='left';c.textBaseline='middle';c.fillStyle=UI.ink;c.font=`650 44px ${UI.sans}`;
+    c.fillText(wrapText(c,item.name,470,1)[0]||'',30,top+(item.category?52:band/2));
+    if(item.category){c.fillStyle=UI.muted;c.font=`500 28px ${UI.sans}`;c.fillText(title(item.category),30,top+102);}
+    const bx=W-250,by=top+18,bw=232,bh=band-36,hot=hovered.has('card:edit');
+    c.fillStyle=hot?'#3d6f68':UI.primary;c.beginPath();c.roundRect(bx,by,bw,bh,22);c.fill();c.lineWidth=5;c.strokeStyle=UI.mint;c.stroke();
+    c.fillStyle='#fffbe8';c.font=`700 46px ${UI.sans}`;c.textAlign='center';c.fillText('Edit ▸',bx+bw/2,by+bh/2+2);
+    card.regions=[{id:'card:edit',press:()=>editPart(),contains:(x,y)=>x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh}];
+    card.texture.needsUpdate=true;
+  }
+  // Above the selected part, upright and turned to you; larger further off, so it stays readable.
+  function placeCard() {
+    const item=stage()==='scene'?selected():null,box=item?bounds(item.id):null;
+    if(!box){card.mesh.visible=false;card.shown=null;return;}
+    if(card.shown!==item.id){card.shown=item.id;card.since=performance.now();card.signature='';}
+    const centre=box.getCenter(new THREE.Vector3()),eye=camera().position,size=THREE.MathUtils.clamp(eye.distanceTo(centre)/.9,1,4);
+    card.mesh.scale.setScalar(size);
+    card.mesh.position.set(centre.x,box.max.y+.012*size+card.height*size/2,centre.z);
+    card.mesh.lookAt(eye.x,card.mesh.position.y,eye.z);card.mesh.visible=true;
+  }
+  // A laser on the card: what it points at (only a button catches it; the rest of the card lets the laser through).
+  function laser(hand,ray) {
+    hand.laserHover=null;
+    if(!card.mesh.visible)return null;
+    card.mesh.updateMatrixWorld();
+    const hit=ray.intersectObject(card.mesh,false)[0];if(!hit)return null;
+    const {x,y}=card.toCanvas(card.mesh.worldToLocal(hit.point.clone())),region=card.regionAt(x,y);if(!region)return null;
+    hand.laserHover=region.id;
+    const settled=performance.now()-(card.since||0)>POKE.settle;
+    return {id:region.id,distance:hit.distance,point:hit.point,press:()=>{if(settled){hand.presses=(hand.presses||0)+1;region.press();}}};
+  }
+
   // ---------- the watch on your left wrist, the button on your right ----------
   const handOf=side=>hands.find(hand=>hand.source?.handedness===side);
   function wear(s,hand,side) {
@@ -343,14 +422,17 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
   let captionUntil=0;
   function update() {
     wear(face,handOf('left'),'left');wear(wrist,handOf('right'),'right');
-    hovered=new Set(hands.map(hand=>hand.uiHover).filter(Boolean));
+    placeCard();
+    hovered=new Set(hands.flatMap(hand=>[hand.uiHover,hand.laserHover]).filter(Boolean));
+    // The selection went (or Edit part began): its rings go with it.
+    if(radial.mesh.visible&&['part','part-color'].includes(menu)&&(!selected()||stage()!=='scene')){stack=[top()];menu=top();radial.signature='';}
     // The mode changed (on the computer, by voice, or from the wrist): the menu follows it.
     if(radial.mesh.visible&&stack[0]!==top()&&!['tools','style'].includes(stack[1])){stack=[top()];menu=top();radial.signature='';}
     if(radial.mesh.visible&&menu&&!menuOf(menu))back();
-    drawFace();drawRadial();drawKeyboard();drawWrist();
+    drawFace();drawRadial();drawKeyboard();drawWrist();drawCard();
     if(caption.mesh.visible&&performance.now()>captionUntil)caption.mesh.visible=false;
   }
-  function close(){closeMenu();closeKeyboard();}
+  function close(){closeMenu();closeKeyboard();card.mesh.visible=false;}   // (the card comes back next frame while in VR)
   // A short caption in front of you: what happened, or what a voice command was heard as.
   function say(message) {
     const c=caption.context,W=caption.canvas.width,H=caption.canvas.height;
@@ -384,7 +466,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
     return options;
   }
 
-  return {update,pointer,close,say,voiceOptions,openNamed,confirmSend,dictate,send,editPart,
+  return {update,pointer,laser,close,say,voiceOptions,openNamed,confirmSend,dictate,send,editPart,showStats,unselect,paint,
     openMenu:()=>{if(!radial.mesh.visible)openMenu();},
     get searching(){return voice.state!=='idle';},   // the keyboard's microphone is in use
     // Any menu up: the model is not gripped or marked meanwhile.
@@ -394,7 +476,8 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       return {caption:caption.mesh.visible?caption.text:null,voice:voice.state,voiceNote,face:face.mesh.visible?face.mesh.position.toArray():null,
         button:wrist.mesh.visible?wrist.mesh.position.toArray():null,buttonLabel:wrist.signature?JSON.parse(wrist.signature)[0]:null,
         menu:radial.mesh.visible?menu:null,path:radial.mesh.visible?[...stack]:[],keyboard:keyboard.mesh.visible?field:null,text,
-        regions:{watch:regions(face),radial:regions(radial),keyboard:regions(keyboard),wrist:regions(wrist)}};
+        card:card.mesh.visible?{part:card.shown,stats:statsShown?statLines(selected()).map(([label])=>label):null,position:card.mesh.position.toArray()}:null,
+        regions:{watch:regions(face),radial:regions(radial),keyboard:regions(keyboard),wrist:regions(wrist),card:regions(card)}};
     },
     // Where a region's middle is in the room, for the browser test to point or poke at it.
     regionPoint(id){

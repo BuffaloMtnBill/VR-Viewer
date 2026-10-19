@@ -69,7 +69,7 @@ const url=process.env.EDITOR_VR_URL||'http://127.0.0.1:8021';
   await peer.waitForFunction(()=>editor.link.state.scene.objects.length===3&&editor.viewer.meshes.size===3);
   const added=await peer.evaluate(()=>editor.link.state.scene.objects[2]);
   assert.equal(added.name,'tiny tetra');assert.equal(await peer.evaluate(()=>editor.link.state.selected),added.id,'The added part is selected');
-  assert.equal(await desktop.locator('#annotation-count').textContent(),'0');
+  await desktop.waitForFunction(()=>document.getElementById('annotation-count').textContent==='0');   // the added part has no marks
   // Remove it again (the files are untouched).
   desktop.once('dialog',dialog=>dialog.accept());await desktop.locator('#remove-part').click();
   await peer.waitForFunction(()=>editor.link.state.scene.objects.length===2&&editor.viewer.meshes.size===2);

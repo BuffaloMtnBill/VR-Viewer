@@ -16,7 +16,7 @@ const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js')
     const page=await browser.newPage({viewport:{width:1400,height:950},permissions:['microphone']}),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     // What the computer "hears": commands for each clip in turn; a dictated note when the keyboard asks.
-    const heard=['Open menu.','Stand.','Edit part.','Annotate mode.','Open menu.','Smooth or blend.','Back.','Measure tool.','Submit.','Not yet.','Take a note.','Back to scene.'],sent=[];
+    const heard=['Open menu.','Stand.','Show stats.','Make it blue.','Edit part.','Annotate mode.','Open menu.','Smooth or blend.','Back.','Measure tool.','Submit.','Not yet.','Take a note.','Back to scene.'],sent=[];
     await page.route('**/api/transcribe',route=>{const body=route.request().postDataJSON();sent.push(body);
       route.fulfill({json:{text:body.purpose==='note'?'Round the rim by 2 mm.':heard.shift()??''}});});
     await page.addInitScript({content:`${await fs.readFile(iwer,'utf8')}\nwindow.xrDevice=new IWER.XRDevice(IWER.metaQuest3);window.xrDevice.installRuntime({forceInstall:true});`});
@@ -32,6 +32,9 @@ const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js')
     assert.equal(sent[0].purpose,'command');
     const stand=await page.evaluate(()=>editor.link.state.scene.objects.find(o=>o.name==='Stand').id);
     await until(id=>editor.link.state.selected===id,stand);
+    // "Show stats" puts them on the card above Stand; "Make it blue" paints it.
+    await until(()=>editor.vr.state.watch.card?.stats?.includes('Triangles'));
+    await until(id=>editor.link.state.scene.objects.find(o=>o.id===id).color==='#3a7bd5',stand);
     await until(id=>editor.link.state.stage==='object'&&editor.link.state.model.object_id===id,stand);
     // "Annotate mode" (a command: the menu has closed); "Open menu" now opens Annotate's ring.
     await until(()=>editor.link.state.settings.mode==='edit');
@@ -59,6 +62,6 @@ const iwer=process.env.EDITOR_VR_IWER||require.resolve('iwer/build/iwer.min.js')
     // "Back to scene": every part again.
     await until(()=>editor.link.state.stage==='scene');
     assert.deepEqual(errors,[],`No page errors: ${errors.join('; ')}`);
-    console.log('VR voice commands, parts by name, Edit part and Back to scene, options from any ring, confirmation before sending, and dictation passed.');
+    console.log('VR voice commands, parts by name, stats and color, Edit part and Back to scene, options from any ring, confirmation before sending, and dictation passed.');
   } finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

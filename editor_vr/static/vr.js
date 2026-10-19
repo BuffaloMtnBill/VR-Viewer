@@ -1,11 +1,13 @@
 // VR for the shared workspace (WebXR, e.g. a Meta Quest on the LAN), with hands or controllers. The scene comes first:
-// point a laser at a part and pinch (or pull the trigger) to select it; pinch and drag (or make a fist, or hold the
-// grip button) to move the whole scene. Edit part shows the selected part alone, in two modes. Inspect: grip it (a
-// pinch or a fist; a controller's trigger or grip button) to move and turn it, and with both hands to scale it.
-// Annotate: a laser from each hand marks it with the chosen tool (a pinch, or the trigger); a fist (or the grip
-// button) still moves it. The interface is tapped with a fingertip: the watch on the left wrist
-// opens the menus, and the button on the right wrist switches to Annotate, then submits. Voice commands run
-// throughout. The model's placement is shared with every device; the view (and the room around it) is your own.
+// point a laser at a part and pinch (or pull the trigger) to select it. The model (the scene, or the part being
+// edited) is handled as in 3D-VR-Terrain's model view:
+// - a fist (a controller's grip button) turns it as the fist turns, about its center;
+// - a pinch on the model itself (or the trigger, touching it) picks it up and carries it as if in your hand;
+// - a pinch anywhere else (the trigger) drags it, and with both hands zooms it and turns it about the vertical.
+// In Annotate, a laser from each hand marks the part with the chosen tool (a pinch, or the trigger) and a fist still
+// turns it. The interface is tapped with a fingertip: the watch on the left wrist opens the menus, and the button on
+// the right wrist switches to Annotate, then submits. Voice commands run throughout. The model's placement is shared
+// with every device; the view (and the room around it) is your own.
 import * as THREE from 'three';
 import {createHandSkin} from './vr-hands.js';
 import {createAnnotate} from './vr-annotate.js';
@@ -16,6 +18,32 @@ import {ENVIRONMENTS,createEnvironments} from './vr-environments.js';
 
 const PINCH={press:.018,release:.025};   // thumb-to-index distance (m) that starts and ends a pinch
 const TIP=new THREE.Vector3(0,0,-.06);   // a controller taps with a small dot this far in front of it
+const NEAR=.02;   // a pinch within this far (m) of the model's bounds is on it, and picks it up
+const PICK=.025;  // a pinch on a part (by laser) that moves further than this (m) drags the scene instead of selecting
+// Steadying tracked hands while they hold the model: a One Euro filter (Casiez et al. 2012) smooths the tracking's
+// millimeter jitter when the hand is nearly still and follows at once when it moves fast. cutoff in Hz; beta per m/s
+// (or per radian/s for a turn).
+const STEADY={cutoff:1.5,beta:12,derivative:1};
+const Y=new THREE.Vector3(0,1,0);
+const smoothing=(cutoff,dt)=>1/(1+1/(2*Math.PI*cutoff*dt));
+function steadyPoint() {
+  let last=null,speed=0;const value=new THREE.Vector3();
+  return {reset(){last=null;},
+    filter(raw,dt) {
+      if(!last||!(dt>0)){last=value.copy(raw);speed=0;return value;}
+      speed+=(raw.distanceTo(value)/dt-speed)*smoothing(STEADY.derivative,dt);
+      return value.lerp(raw,smoothing(STEADY.cutoff+STEADY.beta*speed,dt));
+    }};
+}
+function steadyTurn() {
+  let last=null,speed=0;const value=new THREE.Quaternion();
+  return {reset(){last=null;},
+    filter(raw,dt) {
+      if(!last||!(dt>0)){last=value.copy(raw);speed=0;return value;}
+      speed+=(value.angleTo(raw)/dt-speed)*smoothing(STEADY.derivative,dt);
+      return value.slerp(raw,smoothing(STEADY.cutoff+STEADY.beta*speed,dt));
+    }};
+}
 
 let instance=null;
 // The VR controller for this page, for the browser tests.
@@ -24,7 +52,7 @@ export const currentVR=()=>instance;
 export function createVR(viewer,link,tools,ctx) {
   const {renderer,scene}=viewer;
   const camera=new THREE.PerspectiveCamera(70,1,.01,30);scene.add(camera);viewer.xrCamera=camera;
-  let session=null,grab=null,lastTransform=0,voiceOn=true,modeOverride=null;
+  let session=null,grab=null,lastTransform=0,lastTime=null,voiceOn=true,modeOverride=null;
 
   // ---------- the room around the model ----------
   // The room is your own (the desktop keeps the studio); a living one runs on its own day clock.
@@ -49,12 +77,18 @@ export function createVR(viewer,link,tools,ctx) {
     if(next==='scene')watch?.say('The scene · point at a part and pinch to select it');
   }
   function select(objectId){link.action({type:'select',object_id:objectId}).catch(()=>{});}
+  // Where a part is in the room: its box (for the card above it), or null while it is not shown.
+  function partBounds(objectId) {
+    const mesh=[...viewer.meshes.values()].find(m=>m.userData.objectId===objectId);
+    if(!mesh?.visible)return null;
+    viewer.pivot.updateMatrixWorld(true);return new THREE.Box3().setFromObject(mesh);
+  }
   const mode=()=>modeOverride&&performance.now()<modeOverride.until?modeOverride.mode:link.state?.settings.mode||'inspect';
   function setMode(next) {
     if(next===mode())return;
     modeOverride={mode:next,until:performance.now()+1500};
     release();ctx.settings({mode:next});
-    watch?.say(next==='edit'?`Annotate · ${TOOL_NAMES[link.state.settings.tool]}`:'Inspect · grip the model to move it');
+    watch?.say(next==='edit'?`Annotate · ${TOOL_NAMES[link.state.settings.tool]}`:'Inspect · pinch the part to hold it, a fist turns it');
   }
 
   // ---------- controllers and hands ----------
@@ -65,7 +99,7 @@ export function createVR(viewer,link,tools,ctx) {
     const body=new THREE.Mesh(new THREE.CylinderGeometry(.017,.022,.11,16),new THREE.MeshStandardMaterial({color:0x8c9eae,roughness:.5}));
     body.rotation.x=Math.PI/2.6;body.position.set(0,-.01,.03);grip.add(body);
     const hand={index,controller,grip,xrHand,skin:createHandSkin(xrHand),dot,source:null,held:false,fist:false,pinch:false,mode:null,
-      point:new THREE.Vector3(),rotation:new THREE.Quaternion(),tracked:false,gripStart:null};
+      point:new THREE.Vector3(),rotation:new THREE.Quaternion(),tracked:false,gripStart:null,kind:null,steady:steadyPoint(),steadyTurn:steadyTurn()};
     controller.addEventListener('connected',event=>{hand.source=event.data;});
     controller.addEventListener('disconnected',()=>{hand.source=null;hand.held=false;if(hand.mode==='paint')annotate.cancel();hand.mode=null;rebase();});
     scene.add(controller,grip,xrHand);
@@ -93,27 +127,50 @@ export function createVR(viewer,link,tools,ctx) {
     const reach=name=>joint(hand,`${name}-finger-tip`)?.position.distanceTo(wrist.position)??1;
     return ['index','middle','ring'].every(name=>reach(name)<(hand.fist?.13:.11));
   }
-  // What a hand is asking for: to grip the model, or to mark it. Inspect grips with any pinch, fist, trigger, or grip
-  // button; Annotate marks with a pinch (or the trigger) and grips with a fist (or the grip button).
-  function intent(hand) {
-    const buttons=hand.source?.gamepad?.buttons||[];
-    if(hand.tracked){hand.fist=fist(hand);hand.pinch=!hand.fist&&pinching(hand);}
-    const trigger=hand.tracked?hand.pinch:Boolean(buttons[0]?.pressed),squeeze=hand.tracked?hand.fist:Boolean(buttons[1]?.pressed);
-    if(stage()==='scene')return {grip:squeeze,pick:trigger&&!squeeze,mark:false};
-    return mode()==='edit'?{grip:squeeze,mark:trigger&&!squeeze}:{grip:trigger||squeeze,mark:false};
+  // What a hand is doing: a pinch or a fist (a controller's trigger or grip button), decided as it starts and kept
+  // while it is held; null when open. A pinch first: a pinch with the other fingers curled can read as a fist too.
+  function gesture(hand) {
+    if(hand.tracked) {
+      const pinch=pinching(hand),closed=fist(hand);hand.pinch=pinch;hand.fist=closed;
+      if(hand.held)return hand.kind==='fist'?closed?'fist':null:pinch||closed?'pinch':null;
+      return pinch?'pinch':closed?'fist':null;
+    }
+    const buttons=hand.source?.gamepad?.buttons||[],trigger=Boolean(buttons[0]?.pressed),squeeze=Boolean(buttons[1]?.pressed);
+    if(hand.held&&hand.kind)return (hand.kind==='pinch'?trigger:squeeze)||trigger||squeeze?hand.kind:null;
+    return trigger?'pinch':squeeze?'fist':null;
   }
-  // Where a hand holds: between thumb and index tips (following the wrist once gripped, so opening the fingers to let
-  // go never moves the model), or the controller itself; and how it is turned.
-  function handPoint(hand) {
+  // Where a hand holds: between thumb and index tips, or the controller itself; and how it is turned. While gripping,
+  // a tracked hand's point follows the wrist from where the grip began (opening the fingers to let go never moves the
+  // model), and its point and turn are steadied (see STEADY).
+  function handPoint(hand,dt=0) {
     const thumb=joint(hand,'thumb-tip'),index=joint(hand,'index-finger-tip'),wrist=joint(hand,'wrist');
     if(hand.tracked&&thumb&&index) {
-      if(hand.gripStart&&wrist)hand.point.copy(hand.gripStart.pinch).add(wrist.position).sub(hand.gripStart.wrist);
-      else hand.point.copy(thumb.position).add(index.position).multiplyScalar(.5);
-      if(wrist)hand.rotation.copy(wrist.quaternion);
+      if(hand.gripStart&&wrist) {
+        hand.point.copy(hand.steady.filter(raw.copy(hand.gripStart.pinch).add(wrist.position).sub(hand.gripStart.wrist),dt));
+        hand.rotation.copy(hand.steadyTurn.filter(wrist.quaternion,dt));
+      } else {
+        hand.point.copy(thumb.position).add(index.position).multiplyScalar(.5);
+        if(wrist)hand.rotation.copy(wrist.quaternion);
+      }
     } else {
       hand.controller.getWorldPosition(hand.point);hand.controller.getWorldQuaternion(hand.rotation);
     }
     return hand.point;
+  }
+  const raw=new THREE.Vector3();
+  // What a held thing turns about: the wrist (or the controller), so the model turns in the hand as a held thing does.
+  const handPivot=(hand,out)=>hand.tracked&&hand.gripStart?out.copy(hand.point).sub(hand.gripStart.pinch).add(hand.gripStart.wrist):out.copy(hand.point);
+  function startGrip(hand) {
+    const wrist=hand.tracked&&joint(hand,'wrist');
+    handPoint(hand);hand.gripStart=wrist?{pinch:hand.point.clone(),wrist:wrist.position.clone()}:null;
+    hand.steady.reset();hand.steadyTurn.reset();
+  }
+  // Whether a point in the room is on the model: within NEAR of what is shown.
+  const modelBox=new THREE.Box3();
+  function onModel(point) {
+    viewer.pivot.updateMatrixWorld(true);modelBox.makeEmpty();
+    for(const mesh of viewer.meshes.values())if(mesh.visible)modelBox.expandByObject(mesh);
+    return !modelBox.isEmpty()&&modelBox.expandByScalar(NEAR).containsPoint(point);
   }
   // The point a hand taps with: the index fingertip, or the dot in front of a controller.
   function fingertipOf(hand) {
@@ -122,26 +179,40 @@ export function createVR(viewer,link,tools,ctx) {
     return hand.controller.localToWorld(TIP.clone());
   }
 
-  // ---------- gripping: one hand moves and turns the model, two also scale it ----------
+  // ---------- moving the model (the pivot: its center, turn, and scale in the room) ----------
+  // grab: one hand drags it; two zoom it (hands apart zoom in) and turn it about the vertical, the grabbed points
+  // staying in your hands. spin: a fist turns it as the fist turns, about its center, which stays put. hold: a pinch
+  // on it carries it as a rigid body fixed to the hand, moving and turning with the hand.
+  const MOVING=['grab','spin','hold'];
   function rebase() {
-    const holding=hands.filter(h=>h.mode==='grab');
-    viewer.localBusy=holding.length>0;
-    grab=holding.length?{hands:holding,points:holding.map(h=>h.point.clone()),rotations:holding.map(h=>h.rotation.clone()),
-      position:viewer.pivot.position.clone(),quaternion:viewer.pivot.quaternion.clone(),scale:viewer.pivot.scale.x}:null;
+    const moving=hands.filter(h=>MOVING.includes(h.mode));
+    viewer.localBusy=moving.length>0;
+    grab=moving.length?{hands:moving.map(hand=>({hand,mode:hand.mode,point:hand.point.clone(),pivot:handPivot(hand,new THREE.Vector3()),turn:hand.rotation.clone()})),
+      position:viewer.pivot.position.clone(),quaternion:viewer.pivot.quaternion.clone(),scale:viewer.pivot.scale.x,yaw:0}:null;
   }
-  function moveGrab() {
+  const turn=new THREE.Quaternion(),yawTurn=new THREE.Quaternion(),now=new THREE.Vector3();
+  function moveModel() {
     if(!grab)return;
-    const g=grab,q=new THREE.Quaternion();let anchor=g.points[0],current=g.hands[0].point,ratio=1;
-    if(g.hands.length===1)q.copy(g.hands[0].rotation).multiply(g.rotations[0].clone().invert());
-    else {
-      const start=g.points[1].clone().sub(g.points[0]),end=g.hands[1].point.clone().sub(g.hands[0].point);
+    const g=grab,pivot=viewer.pivot,grabbing=g.hands.filter(h=>h.hand.mode==='grab');
+    if(grabbing.length===2) {
+      const [a,b]=grabbing,start=b.point.clone().sub(a.point),end=b.hand.point.clone().sub(a.hand.point);
       if(start.length()<.025||end.length()<.025)return;
-      const scale=THREE.MathUtils.clamp(g.scale*end.length()/start.length(),.00001,1);ratio=scale/g.scale;
-      q.setFromUnitVectors(start.normalize(),end.normalize());
-      anchor=g.points[0].clone().add(g.points[1]).multiplyScalar(.5);current=g.hands[0].point.clone().add(g.hands[1].point).multiplyScalar(.5);
+      const ratio=THREE.MathUtils.clamp(g.scale*end.length()/start.length(),.00001,1)/g.scale;
+      // Turning only about the vertical, so the model stays upright; kept as it was while the hands are stacked.
+      if(Math.hypot(start.x,start.z)>.04&&Math.hypot(end.x,end.z)>.04)g.yaw=Math.atan2(end.x,end.z)-Math.atan2(start.x,start.z);
+      yawTurn.setFromAxisAngle(Y,g.yaw);
+      const from=a.point.clone().add(b.point).multiplyScalar(.5),to=a.hand.point.clone().add(b.hand.point).multiplyScalar(.5);
+      pivot.position.copy(g.position).sub(from).multiplyScalar(ratio).applyQuaternion(yawTurn).add(to);
+      pivot.quaternion.copy(yawTurn).multiply(g.quaternion);pivot.scale.setScalar(g.scale*ratio);
+    } else if(grabbing.length===1) {
+      const [a]=grabbing;pivot.position.copy(g.position).add(a.hand.point).sub(a.point);
+    } else {
+      const held=g.hands[0];if(!held)return;
+      turn.copy(held.hand.rotation).multiply(held.turn.clone().invert());
+      pivot.quaternion.copy(turn).multiply(g.quaternion).normalize();
+      if(held.mode==='hold')pivot.position.copy(g.position).sub(held.pivot).applyQuaternion(turn).add(handPivot(held.hand,now));
     }
-    viewer.pivot.position.copy(g.position).sub(anchor).multiplyScalar(ratio).applyQuaternion(q).add(current);
-    viewer.pivot.quaternion.copy(q).multiply(g.quaternion);viewer.pivot.scale.setScalar(g.scale*ratio);viewer.pivot.updateMatrixWorld(true);
+    pivot.updateMatrixWorld(true);
   }
   function publishTransform(force=false) {
     const now=performance.now();if(!force&&now-lastTransform<120)return;lastTransform=now;
@@ -149,60 +220,64 @@ export function createVR(viewer,link,tools,ctx) {
   }
   // Let go of everything: a menu opened, the mode changed, or the model changed.
   function release() {
-    const moved=hands.some(h=>h.mode==='grab');
+    const moved=hands.some(h=>MOVING.includes(h.mode));
     hands.forEach(hand=>{if(hand.mode==='paint')annotate.cancel();hand.mode=null;hand.gripStart=null;});
     rebase();if(moved)publishTransform(true);
   }
 
   // ---------- per frame ----------
-  function updateHand(hand) {
+  function updateHand(hand,dt) {
     hand.tracked=Boolean(hand.source?.hand);
     hand.grip.visible=Boolean(hand.source)&&!hand.tracked;hand.dot.visible=Boolean(hand.source)&&!hand.tracked;
     if(!hand.source){annotate.aim(hand,false);return;}
+    handPoint(hand,dt);
     // Tapping the watch, its menus, the keyboard, and the wrist button: fingertips only.
-    const ui=watch.pointer(hand,{fingertip:fingertipOf(hand)}),want=intent(hand),pressed=want.grip||want.mark||want.pick;
-    const other=hands.find(h=>h!==hand),inScene=stage()==='scene';
-    annotate.aim(hand,(inScene||mode()==='edit')&&!ui.onUI&&!watch.busy&&hand.mode!=='grab',inScene?'#6be0d4':null);
+    const ui=watch.pointer(hand,{fingertip:fingertipOf(hand)}),kind=gesture(hand),pressed=Boolean(kind);
+    const other=hands.find(h=>h!==hand),inScene=stage()==='scene',marking=!inScene&&mode()==='edit';
+    annotate.aim(hand,(inScene||marking)&&!ui.onUI&&!watch.busy&&!MOVING.includes(hand.mode),inScene?'#6be0d4':null,inScene?ray=>watch.laser(hand,ray):null);
+    if(!inScene)hand.laserHover=null;
     if(pressed&&!hand.held) {
-      const wrist=hand.tracked&&joint(hand,'wrist');
+      hand.kind=kind;
       if(ui.onUI||watch.busy)hand.mode='ui';   // a hand at the interface (or with a menu up) never grips or marks
-      else if(other.mode==='grab'||other.mode==='paint') {
-        // A second hand joins in: the two grip together (an unfinished stroke is dropped).
+      else if(kind==='pinch'&&hand.panel){hand.panel.press();hand.mode='ui';}   // the laser on the part's card: Edit ▸
+      else if(MOVING.includes(other.mode)||other.mode==='paint') {
+        // A second hand joins in: the two grab together, to zoom and turn (an unfinished stroke is dropped).
         if(other.mode==='paint')annotate.cancel();
-        hand.mode='grab';other.mode='grab';hand.gripStart=wrist?{pinch:handPoint(hand).clone(),wrist:wrist.position.clone()}:null;rebase();
-      } else if(want.pick&&hand.hit?.objectId) {
-        // A pinch on a part picks it when let go; moved first, it grips the scene instead.
-        hand.mode='pick';hand.pick={objectId:hand.hit.objectId,from:handPoint(hand).clone()};
-      } else if(want.grip||want.pick) {
-        handPoint(hand);hand.gripStart=wrist?{pinch:hand.point.clone(),wrist:wrist.position.clone()}:null;
-        hand.mode='grab';rebase();
-      } else hand.mode=annotate.begin(hand)||'tool';
+        startGrip(hand);hand.mode='grab';other.mode='grab';rebase();
+      } else if(kind==='fist'){startGrip(hand);hand.mode='spin';rebase();}
+      else if(marking)hand.mode=annotate.begin(hand)||'tool';
+      else if(onModel(hand.point)){startGrip(hand);hand.mode='hold';rebase();}
+      else if(inScene&&hand.hit?.objectId) {
+        // A pinch on a part picks it when let go; moved first, it drags the scene instead.
+        hand.mode='pick';hand.pick={objectId:hand.hit.objectId,from:hand.point.clone()};
+      } else {startGrip(hand);hand.mode='grab';rebase();}
     } else if(pressed&&hand.mode==='paint')annotate.move(hand);
-    else if(pressed&&hand.mode==='pick'&&handPoint(hand).distanceTo(hand.pick.from)>.025) {
-      const wrist=hand.tracked&&joint(hand,'wrist');
-      hand.mode='grab';hand.gripStart=wrist?{pinch:hand.point.clone(),wrist:wrist.position.clone()}:null;rebase();
-    } else if(!pressed&&hand.held) {
-      const was=hand.mode;hand.mode=null;hand.gripStart=null;
+    else if(pressed&&hand.mode==='pick'&&hand.point.distanceTo(hand.pick.from)>PICK){startGrip(hand);hand.mode='grab';rebase();}
+    else if(!pressed&&hand.held) {
+      const was=hand.mode;hand.mode=null;hand.gripStart=null;hand.kind=null;
       if(was==='pick'){select(hand.pick.objectId);const item=link.state.scene.objects.find(o=>o.id===hand.pick.objectId);if(item)watch.say(`${item.name} · Edit ▸ on your right wrist`);}
       if(was==='paint')annotate.end();
-      if(was==='grab'){publishTransform(true);rebase();}
+      if(MOVING.includes(was)) {
+        // Still holding with the other hand: it carries on alone, from where it is now.
+        publishTransform(true);rebase();
+      }
     }
     hand.held=pressed;
-    handPoint(hand);
     if(hand.tracked)dressJoints(hand,!hand.skin.update(hand.held));
-    hand.dot.material.color.set(hand.uiHover?0xffffff:hand.mode==='grab'?0x6be0d4:0xffb86b);
+    hand.dot.material.color.set(hand.uiHover?0xffffff:MOVING.includes(hand.mode)?0x6be0d4:0xffb86b);
   }
   function update(time,frame) {
     if(!session||!frame)return;
+    const dt=lastTime===null?0:Math.min((time-lastTime)/1000,.1);lastTime=time;
     environments.update(time);
     commands.paused=watch.searching;   // dictation is not a command
     if(modeOverride&&link.state?.settings.mode===modeOverride.mode)modeOverride=null;
     if(stageOverride&&link.state?.stage===stageOverride.stage)stageOverride=null;
-    hands.forEach(updateHand);
+    hands.forEach(hand=>updateHand(hand,dt));
     // A menu opened while the model was held: let go of it there.
-    if(watch.busy&&hands.some(h=>h.mode==='grab'||h.mode==='paint'))release();
+    if(watch.busy&&hands.some(h=>MOVING.includes(h.mode)||h.mode==='paint'))release();
     watch.update();
-    if(grab){moveGrab();publishTransform();}
+    if(grab){moveModel();publishTransform();}
   }
 
   // ---------- voice commands ----------
@@ -228,12 +303,16 @@ export function createVR(viewer,link,tools,ctx) {
       else if(command.name==='inspect'){if(stage()==='scene')watch.editPart();setMode('inspect');}
       else if(command.name==='annotate'){if(stage()==='scene')watch.editPart();setMode('edit');}
       else if(command.name==='edit-part')watch.editPart();
+      else if(command.name==='stats'){if(stage()!=='scene'){watch.say('🎤 Stats show in the scene');return;}watch.showStats(command.show??undefined);}
+      else if(command.name==='unselect')watch.unselect();
+      else if(command.name==='part-color'){if(!watch.openNamed('part-color'))watch.say('🎤 Pick a part first');}
+      else if(command.name==='paint')watch.paint(command.color);
       else if(command.name==='scene'){if(stage()==='scene')watch.say('🎤 Already the whole scene');else setStage('scene');}
       else if(command.name==='reset'){ctx.fit();watch.say('🎤 Reset view');}
       else if(command.name==='exit'){watch.say('🎤 Exit');session.end();}
     },
     onError:message=>watch?.say(`🎤 ${message}`)});
-  watch=createWatch({scene,camera:()=>camera,joint,hands,link,mode,setMode,stage,setStage,select,api,
+  watch=createWatch({scene,camera:()=>camera,joint,hands,link,mode,setMode,stage,setStage,select,api,bounds:partBounds,
     exit:()=>session?.end(),submit:()=>ctx.submit(),undo:()=>ctx.undo(),fit:()=>ctx.fit(),
     backgrounds:{list:ENVIRONMENTS,get current(){return backdrop;},set:setBackdrop,
       get living(){return environments.living;},get running(){return environments.running;},pause:()=>environments.pause()},
@@ -274,6 +353,7 @@ export function createVR(viewer,link,tools,ctx) {
     // The model changed under the hands: drop what they were doing.
     cancelInteraction(){tools.cancel();release();},
     regionPoint:id=>watch.regionPoint(id),
+    get watch(){return watch;},   // for the browser tests
     environments,
     get presenting(){return Boolean(session);},
     get session(){return session;},

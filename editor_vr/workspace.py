@@ -143,7 +143,9 @@ class Workspace:
         if len(parts)>MAX_OBJECTS:raise ValueError(f'Limit a scene to {MAX_OBJECTS} parts.')
         parts=mesh.fit_scene(parts)
         self.state['scene']={'id':uuid.uuid4().hex,'name':text(name,180,'Scene name') or 'Scene','source':source,'objects':[self._store(p) for p in parts]}
-        self.state.update(stage='scene',selected=None,marks=[])
+        # A scene opens for viewing. A monolithic model (one part) is selected at once, so Edit is the next step.
+        objects=self.state['scene']['objects']
+        self.state.update(stage='scene',selected=objects[0]['id'] if len(objects)==1 else None,marks=[])
         self._mesh_cache={o['model_id']:self._mesh_cache[o['model_id']] for o in self.state['scene']['objects']}
         self._activate(self.state['scene']['objects'][0]);self._show();self._touch(actor)
 

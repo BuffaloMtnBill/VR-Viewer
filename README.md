@@ -42,7 +42,7 @@ The HTTPS, certificate, pairing and hand-model approach follows the requested `3
 
 ## Scenes and parts
 
-Editor-VR opens a **scene**: several parts placed together, the way the Visualizer shows a model. It starts on the scene, for viewing: select a part, add parts, or remove one. **Edit part** then shows the selected part on its own, with the marking tools; **◀ Back to scene** returns to the whole scene. Marks belong to the part they were made on and wait there while other parts are edited (the scene's part list counts them). Edit requests are made for one part at a time. The scene, the selected part and which part is being edited are shared by every device.
+Editor-VR opens a **scene**: several parts placed together, the way the Visualizer shows a model. It starts on the scene, for viewing: select a part, add parts, or remove one. A monolithic model (a single part, such as one STL) opens with that part already selected, so **Edit part** is the next step. **Edit part** then shows the selected part on its own, with the marking tools; **◀ Back to scene** returns to the whole scene. Marks belong to the part they were made on and wait there while other parts are edited (the scene's part list counts them). Edit requests are made for one part at a time. The scene, the selected part and which part is being edited are shared by every device.
 
 **Model projects.** **Open project…** lists the model projects on this computer, in the Visualizer's layout: one folder per model under `~/Projects/Models` (or the folder given with `--models DIR`, or `EDITOR_VR_MODELS`), each with `preview/*_assembled.3mf` scenes and `stl/` part files. Open an assembled scene, or all of a project's part files side by side. **＋ Add part** then offers the open project's part files, one at a time, added beside the scene. Only files inside the models folder can be opened, and nothing there is written.
 
@@ -74,19 +74,23 @@ Both tracked hands and controllers work. Hands are drawn with locally hosted han
 | --- | --- | --- |
 | Tap the watch, a menu, a key or the wrist button | Touch it with an index fingertip | Touch it with the small dot just in front of the controller |
 | **Scene:** select a part | Point the laser at it and pinch | Point the laser at it and pull the trigger |
-| **Scene:** move, turn and scale the scene | Pinch and drag (or make a fist); both hands to scale | Hold the grip button (or drag with the trigger); both to scale |
-| **Inspect:** move and turn the model | Pinch (or make a fist) and move/turn the hand | Hold the trigger or grip button and move/turn |
-| **Inspect:** scale it | Grip with both hands, move them apart/together, turn their line | The same with both controllers |
+| Hold the model and carry it (it moves and turns with your hand) | Pinch on the model itself | Touch it and hold the trigger |
+| Turn it about its center, which stays put | Make a fist and turn your hand | Hold the grip button and turn the controller |
+| Drag it | Pinch anywhere else and move your hand | Hold the trigger away from it and move |
+| Zoom it and turn it about the vertical | Pinch with both hands: apart to zoom in, together to zoom out; turn their line to turn it | The same with both triggers |
 | **Annotate:** mark the model | Point the laser and pinch (spray: drag; 3D region: drag out the box) | Point the laser and hold the trigger |
-| **Annotate:** move the model | Make a fist | Hold the grip button |
 
-A second hand gripping while the first marks or grips turns both into a two-hand grip. The laser shows in the scene (for selecting) and in Annotate (in the mark's color), only while the hand is away from the menus. A pinch on a part selects it when you let go; moved more than a couple of centimeters first, it grips the scene instead. While a menu or the keyboard is open, the model is neither gripped nor marked. A window that has only just opened under a fingertip is not pressed by it until the finger lifts off and comes back.
+The model moves as in 3D-VR-Terrain's model view. "The model" is the whole scene, or the part being edited. Holding, turning, dragging and zooming work the same in the scene, in Inspect and in Annotate, except that in Annotate a pinch marks: there a fist turns the model and two fists zoom it. A second hand gripping while the first holds, turns, drags or marks makes a two-hand zoom; let go with one and the other carries on alone. While a hand grips, its tracking is steadied against jitter, and its grip point follows the wrist, so opening your fingers to let go doesn't nudge the model.
+
+**The selected part** glows with a pulsing outline, and in VR a card floats above it with its name and **Edit ▸**. Point the laser at Edit ▸ and pinch (or pull the trigger), or tap it with a fingertip when it is within reach. **Part ▸ Stats** adds its triangles, size, whether its mesh is closed, its marks, and its category and print file. They stay shown for the next part you select until you hide them.
+
+The laser shows in the scene (for selecting) and in Annotate (in the mark's color), only while the hand is away from the menus. In the scene, a pinch on a part (by laser, from a distance) selects it when you let go. If you move more than a couple of centimeters first, it drags the scene instead. While a menu or the keyboard is open, the model is neither gripped nor marked. A window that has only just opened under a fingertip is not pressed by it until the finger lifts off and comes back.
 
 **The watch on your left wrist** (on top of the left controller): tap its dial and a pie menu opens in front of you, within reach. A slice marked ▸ opens the next ring; every slice shows its current value; the middle shows where you are and goes back one ring (or closes the menu on the first ring). Tapping the watch again closes it from anywhere.
 
 | Where | First ring | Inside |
 | --- | --- | --- |
-| Scene | Parts ▸ · Add part ▸ · Edit part · Part color ▸ (with a part selected) · Reset view · Settings ▸ | **Parts:** every part (six to a ring, then More ▸), its category and marks; tapping one selects it. **Add part:** the open project's part files, added beside the scene (without a project, add parts on the computer). **Part color:** Gray (the plain default), Red, Orange, Yellow, Green or Blue for the selected part |
+| Scene | Parts ▸ · Add part ▸ · Edit part · Part ▸ (with a part selected) · Reset view · Settings ▸ | **Parts:** every part (six to a ring, then More ▸), its category and marks; tapping one selects it. **Add part:** the open project's part files, added beside the scene (without a project, add parts on the computer). **Part:** Edit part, Stats (shown on the part's card), Color ▸ (Gray, the plain default, Red, Orange, Yellow, Green or Blue) and Unselect |
 | Inspect (one part) | ◀ Scene · Reset view · Annotate · Settings ▸ | |
 | Annotate (one part) | Tools ▸ · Mark style ▸ · Note · Undo mark · Submit · ◀ Scene · Settings ▸ | **Tools:** Move model (back to Inspect) and the five tools; choosing one closes the menu. **Mark style:** Color ▸ (the five colors and their meanings), Category ▸, Brush ▸ (−− / − / + / ++ in 5 mm and 0.5 mm steps), Meaning |
 | Everywhere | | **Settings:** Background ▸ (Studio, the desktop's room; a 360° Mellow forest, Sandy desert or Moonlit lake; or the animated Desert day & night, with Pause sky / Run sky; remembered by the headset's browser), Voice on/off, Exit VR ▸ (asks first: Yes, exit or Stay) |
@@ -101,7 +105,11 @@ A second hand gripping while the first marks or grips turns both into a two-hand
 | --- | --- |
 | "Open menu" | Opens the watch's menu |
 | "Open parts", "open tools", "show mark style", "open settings", "open background" | Opens the menu at that ring |
-| "Edit part" | Edits the selected part |
+| "Edit", "Edit part" | Edits the selected part |
+| "Show stats", "Hide stats" | The selected part's stats on its card |
+| "Make it blue" (gray, red, orange, yellow, green) | Paints the selected part |
+| "Change color" | Opens Part ▸ Color |
+| "Unselect", "Clear selection" | Selects nothing |
 | "Back to scene" / "show the scene" | Every part again |
 | "Spray paint", "3D region", "pin a note", "erase mark", or "measure tool" (any tool + "tool") | Chooses that tool, in Annotate (while editing a part) |
 | "Take a note" / "dictate" | Opens the keyboard, already listening |
