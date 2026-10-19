@@ -114,7 +114,9 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       press:()=>{set({category});back();}}))},
     brush:{title:'Brush radius',value:()=>`${settings().brush_radius_mm} mm`,items:()=>[step('−−',-5,['minus five','much smaller']),step('−',-.5,['minus','smaller']),
       step('+',.5,['plus','larger']),step('++',5,['plus five','much larger'])]},
-    background:{title:'Background',items:()=>backgrounds.list.map(b=>({key:b.key,label:b.label,active:backgrounds.current===b.key,press:()=>backgrounds.set(b.key)}))},
+    // A living background can be paused at its time of day (and run on again).
+    background:{title:'Background',items:()=>[...backgrounds.list.map(b=>({key:b.key,label:b.label,aliases:b.aliases,active:backgrounds.current===b.key,detail:b.living?'Sun and moon':undefined,press:()=>backgrounds.set(b.key)})),
+      ...backgrounds.living?[{key:'time',label:backgrounds.running?'Pause sky':'Run sky',aliases:['pause the sky','stop the sky','run the sky','start the sky'],active:!backgrounds.running,press:()=>backgrounds.pause()}]:[]]},
     settings:{title:'Settings',items:()=>[
       {key:'background',label:'Background',aliases:['backgrounds','room'],open:'background',detail:backgrounds.list.find(b=>b.key===backgrounds.current)?.label},
       {key:'voice',label:voiceCommands.on?'Voice: on':'Voice: off',aliases:['voice'],active:voiceCommands.on,press:()=>voiceCommands.toggle()},

@@ -85,7 +85,27 @@ const output=path.resolve(__dirname,'../test-results');
   await tap('radial:scene:settings');await tap('radial:settings:background');await tap('radial:background:lake');
   await page.waitForFunction(()=>editor.vr.state.backgroundShown==='lake.jpg');
   await page.waitForTimeout(400);await page.screenshot({path:path.join(output,`vr-${input}-lake.png`)});
+  // The living desert: the light follows the sun by day and the moon by night, and the sky can be paused.
+  await tap('radial:background:desert-day');
+  s=await state();assert.equal(s.backgroundShown,'desert-day');assert.ok(s.environment.running,'The day runs');
+  const at=async phase=>{await page.evaluate(p=>editor.vr.environments.setPhase(p),phase);await page.waitForTimeout(400);return (await state()).environment;};
+  let sky=await at(.25);
+  assert.equal(sky.light.direction[1]>.8&&sky.source,'sun','At noon the sun is high, and it gives the light');assert.ok(sky.light.intensity>3);
+  await page.screenshot({path:path.join(output,`vr-${input}-desert-noon.png`)});
+  sky=await at(.47);assert.equal(sky.source,'sun');assert.ok(sky.light.direction[0]<-.5&&sky.light.intensity<3,'Low in the west, the sun dims');
+  await page.screenshot({path:path.join(output,`vr-${input}-desert-sunset.png`)});
+  sky=await at(.75);
+  assert.equal(sky.source,'moon');assert.ok(sky.light.direction[1]>.7&&sky.light.intensity>.8&&sky.light.intensity<1.5,'At midnight the moon gives a fainter light');
+  assert.deepEqual(sky.light.direction,sky.moon);
+  await page.screenshot({path:path.join(output,`vr-${input}-desert-night.png`)});
+  await tap('radial:background:time');s=await state();assert.equal(s.environment.running,false,'Pause sky');
+  const paused=s.environment.phase;await page.waitForTimeout(500);assert.equal((await state()).environment.phase,paused);
+  await tap('radial:background:time');assert.ok((await state()).environment.running,'Run sky');
+  await page.waitForFunction(p=>editor.vr.state.environment.phase>p,paused);
+  assert.ok(await page.evaluate(()=>editor.viewer.scene.getObjectByName('desert-day')),'The desert stands around the scene');
   await tap('radial:background:studio');assert.equal((await state()).backgroundShown,'studio');
+  assert.equal(await page.evaluate(()=>editor.viewer.scene.getObjectByName('desert-day')),undefined,'Leaving the desert removes it');
+  assert.ok(await page.evaluate(()=>editor.viewer.scene.children.filter(c=>c.isLight).every(l=>l.intensity>0)),'The studio lights come back');
   await tap('radial:center');await tap('radial:center');assert.equal((await state()).watch.menu,'scene','Back one ring at a time');
   await tap('radial:center');assert.equal((await state()).watch.menu,null,'Close');
 

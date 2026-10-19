@@ -10,7 +10,7 @@ export class ModelViewer{
     this.scene.add(new THREE.HemisphereLight(0xd9edff,0x31313a,2.4));
     const key=new THREE.DirectionalLight(0xffe2bf,4);key.position.set(-2,4,2);this.scene.add(key);
     const rim=new THREE.DirectionalLight(0x9bd3f8,3);rim.position.set(2,2,-4);this.scene.add(rim);
-    const platform=new THREE.Mesh(new THREE.CylinderGeometry(.48,.50,.045,96),new THREE.MeshStandardMaterial({color:0x373d46,roughness:.8,metalness:.15}));platform.position.set(0,.765,-.85);this.scene.add(platform);
+    const platform=new THREE.Mesh(new THREE.CylinderGeometry(.48,.50,.045,96),new THREE.MeshStandardMaterial({color:0x373d46,roughness:.8,metalness:.15}));platform.position.set(0,.765,-.85);this.scene.add(platform);this.platform=platform;
     const ring=new THREE.Mesh(new THREE.TorusGeometry(.485,.0015,6,96),new THREE.MeshBasicMaterial({color:0x677786}));ring.rotation.x=Math.PI/2;ring.position.set(0,.79,-.85);this.scene.add(ring);
     const grid=new THREE.GridHelper(12,120,0x3c4856,0x303b48);grid.position.y=.735;this.scene.add(grid);
     // pivot (the shared placement) › content (model Z-up to view Y-up) › offset (centers what is shown) › one mesh per part

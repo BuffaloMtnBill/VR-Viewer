@@ -12,11 +12,10 @@ import {createAnnotate} from './vr-annotate.js';
 import {createWatch} from './vr-watch.js';
 import {COMMANDS,createCommands,matchCommand,matchOption} from './vr-commands.js';
 import {TOOL_NAMES} from './tools.js';
+import {ENVIRONMENTS,createEnvironments} from './vr-environments.js';
 
 const PINCH={press:.018,release:.025};   // thumb-to-index distance (m) that starts and ends a pinch
 const TIP=new THREE.Vector3(0,0,-.06);   // a controller taps with a small dot this far in front of it
-// The room around the model: the studio the desktop page shows, or a 360° sky.
-export const BACKGROUNDS=[{key:'studio',label:'Studio'},{key:'forest',label:'Mellow forest'},{key:'desert',label:'Sandy desert'},{key:'lake',label:'Moonlit lake'}];
 
 let instance=null;
 // The VR controller for this page, for the browser tests.
@@ -28,21 +27,13 @@ export function createVR(viewer,link,tools,ctx) {
   let session=null,grab=null,lastTransform=0,voiceOn=true,modeOverride=null;
 
   // ---------- the room around the model ----------
-  const studio={background:scene.background,fog:scene.fog,grid:scene.children.find(child=>child.type==='GridHelper')};
+  // The room is your own (the desktop keeps the studio); a living one runs on its own day clock.
+  const environments=createEnvironments(viewer);
   let backdrop='studio';
-  try{if(BACKGROUNDS.some(b=>b.key===localStorage.getItem('editor-vr-background')))backdrop=localStorage.getItem('editor-vr-background');}catch{/* Storage is optional. */}
-  const skies={};
-  function sky(key) {
-    if(!skies[key]){skies[key]=new THREE.TextureLoader().load(`/static/backgrounds/${key}.jpg`);skies[key].mapping=THREE.EquirectangularReflectionMapping;skies[key].colorSpace=THREE.SRGBColorSpace;}
-    return skies[key];
-  }
-  function showBackdrop() {
-    const room=session&&backdrop!=='studio';
-    scene.background=room?sky(backdrop):studio.background;scene.fog=room?null:studio.fog;
-    if(studio.grid)studio.grid.visible=!room;
-  }
+  try{if(ENVIRONMENTS.some(e=>e.key===localStorage.getItem('editor-vr-background')))backdrop=localStorage.getItem('editor-vr-background');}catch{/* Storage is optional. */}
+  const showBackdrop=()=>environments.show(session?backdrop:'studio');
   function setBackdrop(key) {
-    if(!BACKGROUNDS.some(b=>b.key===key))return;
+    if(!ENVIRONMENTS.some(e=>e.key===key))return;
     backdrop=key;showBackdrop();
     try{localStorage.setItem('editor-vr-background',key);}catch{/* Storage is optional. */}
   }
@@ -203,6 +194,7 @@ export function createVR(viewer,link,tools,ctx) {
   }
   function update(time,frame) {
     if(!session||!frame)return;
+    environments.update(time);
     commands.paused=watch.searching;   // dictation is not a command
     if(modeOverride&&link.state?.settings.mode===modeOverride.mode)modeOverride=null;
     if(stageOverride&&link.state?.stage===stageOverride.stage)stageOverride=null;
@@ -243,7 +235,8 @@ export function createVR(viewer,link,tools,ctx) {
     onError:message=>watch?.say(`🎤 ${message}`)});
   watch=createWatch({scene,camera:()=>camera,joint,hands,link,mode,setMode,stage,setStage,select,api,
     exit:()=>session?.end(),submit:()=>ctx.submit(),undo:()=>ctx.undo(),fit:()=>ctx.fit(),
-    backgrounds:{list:BACKGROUNDS,get current(){return backdrop;},set:setBackdrop},
+    backgrounds:{list:ENVIRONMENTS,get current(){return backdrop;},set:setBackdrop,
+      get living(){return environments.living;},get running(){return environments.running;},pause:()=>environments.pause()},
     voiceCommands:{get on(){return voiceOn;},toggle(){voiceOn=!voiceOn;if(voiceOn&&session)commands.start();else commands.stop();}}});
 
   // ---------- session ----------
@@ -281,11 +274,12 @@ export function createVR(viewer,link,tools,ctx) {
     // The model changed under the hands: drop what they were doing.
     cancelInteraction(){tools.cancel();release();},
     regionPoint:id=>watch.regionPoint(id),
+    environments,
     get presenting(){return Boolean(session);},
     get session(){return session;},
     get hands(){return hands;},
     get state(){return {presenting:Boolean(session),stage:stage(),selected:link.state?.selected||null,mode:mode(),background:backdrop,
-      backgroundShown:scene.background?.isTexture?scene.background.image?.src?.split('/').pop()||backdrop:'studio',
+      backgroundShown:scene.background?.isTexture?scene.background.image?.src?.split('/').pop()||backdrop:environments.key,environment:environments.state,
       transform:viewer.currentTransform(),watch:watch.state,lasers:annotate.state,commands:{...commands.state,on:voiceOn},
       hands:hands.map(hand=>({side:hand.source?.handedness||null,tracked:hand.tracked,model:hand.skin.ready,held:hand.held,mode:hand.mode,
         touching:Boolean(hand.poking),presses:hand.presses||0,over:hand.uiHover||null,point:hand.point.toArray(),indexTip:joint(hand,'index-finger-tip')?.position.toArray()||null}))};}};

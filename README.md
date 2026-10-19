@@ -89,7 +89,7 @@ A second hand gripping while the first marks or grips turns both into a two-hand
 | Scene | Parts ▸ · Add part ▸ · Edit part · Reset view · Settings ▸ | **Parts:** every part (six to a ring, then More ▸), its category and marks; tapping one selects it. **Add part:** the open project's part files, added beside the scene (without a project, add parts on the computer) |
 | Inspect (one part) | ◀ Scene · Reset view · Annotate · Settings ▸ | |
 | Annotate (one part) | Tools ▸ · Mark style ▸ · Note · Undo mark · Submit · ◀ Scene · Settings ▸ | **Tools:** Move model (back to Inspect) and the five tools; choosing one closes the menu. **Mark style:** Color ▸ (the five colors and their meanings), Category ▸, Brush ▸ (−− / − / + / ++ in 5 mm and 0.5 mm steps), Meaning |
-| Everywhere | | **Settings:** Background ▸ (Studio, the desktop's room, or a 360° Mellow forest, Sandy desert or Moonlit lake, remembered by the headset's browser), Voice on/off, Exit VR ▸ (asks first: Yes, exit or Stay) |
+| Everywhere | | **Settings:** Background ▸ (Studio, the desktop's room; a 360° Mellow forest, Sandy desert or Moonlit lake; or the animated Desert day & night, with Pause sky / Run sky; remembered by the headset's browser), Voice on/off, Exit VR ▸ (asks first: Yes, exit or Stay) |
 
 **The button on your right wrist** (on top of the right controller), tapped with the other hand: **Edit ▸** in the scene (once a part is selected); **Annotate ▸** in Inspect; **Submit · *n*** (the number of marks) in Annotate. Submit with no note opens the keyboard first, then sends when you tap Done.
 
@@ -126,6 +126,17 @@ While a menu is open, any option in the current menus can be said, not only thos
 | Erase mark | Removes the latest annotation that includes the pointed face. Undo removes the latest draft annotation; Clear removes all draft marks. Submitted packets are kept. |
 
 Colors and edit categories are intent metadata. They do not run any code or select an actual mesh-editing algorithm yet. Categories are size, texture, pattern and general. Each mark captures its current tool settings, and the overall submitted instruction is included separately in the packet.
+
+### Animated backgrounds
+
+**Desert day & night** is built in the scene rather than painted on a 360° image. The sun rises on your right (east), arcs high behind you and sets on your left. The moon follows the same way through a starry night. One light follows whichever is up, and it casts the model's shadow onto the stand:
+- warm and low at sunrise and sunset;
+- white at noon;
+- a fainter blue by moonlight.
+
+A glow from the sky keeps the model easy to work on at night. A whole day and night takes four minutes (`DAY_SECONDS` in `static/vr-environments.js`). **Pause sky** holds the time of day, and **Run sky** carries on.
+
+To add another animated environment, add an entry with a `create(viewer)` function to `ENVIRONMENTS` in that file. It returns `update(phase)`, `dispose()` and `state()`. The day clock, the menu and the studio lights are handled for it. Like the other backgrounds, it is shown only in VR.
 
 ## Desktop handoff and export
 
