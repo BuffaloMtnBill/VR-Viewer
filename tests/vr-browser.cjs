@@ -78,9 +78,18 @@ const output=path.resolve(__dirname,'../test-results');
   assert.ok((await state()).watch.face,'The watch is on the left wrist');
   await tap('watch:face');
   s=await state();assert.equal(s.watch.menu,'scene');
-  assert.deepEqual(s.watch.regions.radial,['radial:scene:parts','radial:scene:add','radial:scene:edit','radial:scene:reset','radial:scene:settings','radial:center']);
+  assert.deepEqual(s.watch.regions.radial,['radial:scene:parts','radial:scene:add','radial:scene:edit','radial:scene:color','radial:scene:reset','radial:scene:settings','radial:center'],'Part color appears with a part selected');
   await tap('radial:scene:add');assert.deepEqual((await state()).watch.regions.radial,['radial:add:0:upload','radial:center'],'Without a project, Add points to the computer');
   await tap('radial:center');
+  // Part color ▸ paints the selected part, on every device; Gray puts it back.
+  await tap('radial:scene:color');
+  assert.deepEqual((await state()).watch.regions.radial,['radial:part-color:gray','radial:part-color:red','radial:part-color:orange','radial:part-color:yellow','radial:part-color:green','radial:part-color:blue','radial:center']);
+  await tap('radial:part-color:blue');
+  await desktop.waitForFunction(id=>editor.link.state.scene.objects.find(o=>o.id===id).color==='#3a7bd5',vessel);
+  await page.waitForFunction(id=>{const m=[...editor.viewer.meshes.values()].find(m=>m.userData.objectId===id),c=m.geometry.attributes.color.array;return c[2]>c[0]*2;},vessel);
+  assert.equal((await state()).watch.menu,'scene','Choosing a color goes back to the scene ring');
+  await tap('radial:scene:color');await tap('radial:part-color:gray');
+  await desktop.waitForFunction(id=>!('color' in editor.link.state.scene.objects.find(o=>o.id===id)),vessel);
   // Settings ▸ Background: the room around the scene.
   await tap('radial:scene:settings');await tap('radial:settings:background');await tap('radial:background:lake');
   await page.waitForFunction(()=>editor.vr.state.backgroundShown==='lake.jpg');

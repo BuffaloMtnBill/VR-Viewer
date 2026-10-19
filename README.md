@@ -58,7 +58,7 @@ Opening another scene clears the draft marks, while submitted requests keep thei
 
 ## Desktop controls
 
-- **Scene:** click a part (in the view or the part list) to select it; double-click it, or **Edit part**, to edit it. Left-drag orbits, right-drag pans, and the wheel zooms.
+- **Scene:** click a part (in the view or the part list) to select it; double-click it, or **Edit part**, to edit it. **Color** picks any color for the selected part. A part's color is kept with the workspace and shown on every device; marks still show in their own colors on top of it. The selected part glows with a pulsing orange outline. Left-drag orbits, right-drag pans, and the wheel zooms.
 - **Editing a part:** click another part in the list to edit it instead; **◀ Back to scene** (or **Escape**) returns to the scene.
 - **Inspect:** left-drag orbits, right-drag pans, and the wheel zooms the desktop camera.
 - **Annotate:** left-click/drag uses the selected tool. Right-drag and the wheel still navigate; hold Shift to orbit. The camera view is local to each device, while the model's placement and annotation data are shared.
@@ -86,7 +86,7 @@ A second hand gripping while the first marks or grips turns both into a two-hand
 
 | Where | First ring | Inside |
 | --- | --- | --- |
-| Scene | Parts ▸ · Add part ▸ · Edit part · Reset view · Settings ▸ | **Parts:** every part (six to a ring, then More ▸), its category and marks; tapping one selects it. **Add part:** the open project's part files, added beside the scene (without a project, add parts on the computer) |
+| Scene | Parts ▸ · Add part ▸ · Edit part · Part color ▸ (with a part selected) · Reset view · Settings ▸ | **Parts:** every part (six to a ring, then More ▸), its category and marks; tapping one selects it. **Add part:** the open project's part files, added beside the scene (without a project, add parts on the computer). **Part color:** Gray (the plain default), Red, Orange, Yellow, Green or Blue for the selected part |
 | Inspect (one part) | ◀ Scene · Reset view · Annotate · Settings ▸ | |
 | Annotate (one part) | Tools ▸ · Mark style ▸ · Note · Undo mark · Submit · ◀ Scene · Settings ▸ | **Tools:** Move model (back to Inspect) and the five tools; choosing one closes the menu. **Mark style:** Color ▸ (the five colors and their meanings), Category ▸, Brush ▸ (−− / − / + / ++ in 5 mm and 0.5 mm steps), Meaning |
 | Everywhere | | **Settings:** Background ▸ (Studio, the desktop's room; a 360° Mellow forest, Sandy desert or Moonlit lake; or the animated Desert day & night, with Pause sky / Run sky; remembered by the headset's browser), Voice on/off, Exit VR ▸ (asks first: Yes, exit or Stay) |

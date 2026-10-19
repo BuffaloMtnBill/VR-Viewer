@@ -15,8 +15,19 @@ const url=process.env.EDITOR_VR_URL||'http://127.0.0.1:8021';
   await peer.mouse.click(vesselPoint.x,vesselPoint.y);
   await desktop.waitForFunction(id=>editor.link.state.selected===id,vessel);
   await desktop.waitForFunction(()=>document.querySelector('.part-row[aria-selected=true]')?.textContent.includes('Fluted vessel'));
+  // Color: the picker paints the selected part on both devices.
+  await desktop.locator('#part-color').evaluate(input=>{input.value='#5cb85c';input.dispatchEvent(new Event('change',{bubbles:true}));});
+  await peer.waitForFunction(id=>{const m=[...editor.viewer.meshes.values()].find(m=>m.userData.objectId===id),c=m.geometry.attributes.color.array;return m.userData.paint==='#5cb85c'&&c[1]>c[0]*2;},vessel);
+  assert.equal(await peer.locator('#part-color').inputValue(),'#5cb85c');
+  // The selected part is outlined, and the outline pulses; the other parts are not.
+  await peer.waitForFunction(id=>editor.viewer.outlined===id,vessel);
+  assert.deepEqual(await peer.evaluate(()=>[...editor.viewer.meshes.values()].map(m=>m.children.filter(c=>c.name.startsWith('outline-')&&c.visible).length).sort()),[0,2]);
+  const beats=await peer.evaluate(async()=>{const seen=new Set();for(let i=0;i<12;i++){seen.add(editor.viewer.outline.edge.uniforms.opacity.value.toFixed(2));await new Promise(r=>setTimeout(r,120));}return seen.size;});
+  assert.ok(beats>3,'The outline pulses');
+  fs.mkdirSync(path.resolve(__dirname,'../test-results'),{recursive:true});await peer.screenshot({path:path.resolve(__dirname,'../test-results/selected-outline.png')});
   await desktop.locator('#edit-part').click();
   await peer.waitForFunction(id=>editor.link.state.stage==='object'&&editor.link.state.model.object_id===id&&editor.viewer.stage==='object',vessel);
+  assert.equal(await peer.evaluate(()=>editor.viewer.outlined),null,'Editing a part drops the outline');
   assert.equal(await peer.evaluate(()=>[...editor.viewer.meshes.values()].filter(m=>m.visible).length),1,'The part is shown alone');
   assert.equal(await peer.locator('#model-name').textContent(),'Fluted vessel');
   await peer.locator('[data-tool=pin]').click();await desktop.waitForFunction(()=>editor.link.state.settings.tool==='pin');

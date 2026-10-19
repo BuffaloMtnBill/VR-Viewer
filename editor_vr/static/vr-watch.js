@@ -10,6 +10,9 @@ import {TOOL_NAMES} from './tools.js';
 import {createVoice} from './vr-voice.js';
 
 export const COLORS=['#ffb86b','#6be0d4','#ad9bff','#ff7895','#72b9ff'];
+// A part's own color in the scene (Gray is the plain default); kept with the workspace, so every device shows it.
+export const PART_COLORS=[{label:'Gray',color:null,fill:'#e3e3e3'},{label:'Red',color:'#d9534f'},{label:'Orange',color:'#f0913a'},
+  {label:'Yellow',color:'#f2d14b'},{label:'Green',color:'#5cb85c'},{label:'Blue',color:'#3a7bd5'}];
 const MEANINGS=['Add or enlarge','Smooth or blend','Surface detail','Remove or reduce','Review this area'],CATEGORIES=['size','texture','pattern','general'];
 const UI={ink:'#ecf1f6',muted:'#a5b6c5',accent:'#ffb86b',mint:'#6be0d4',fill:'#17212bf2',raised:'#243441',hover:'#34495a',active:'#6b5034',
   primary:'#2d5550',line:'#415361',paper:'#17212b',sans:'Inter,"Segoe UI",Arial,sans-serif'};
@@ -46,6 +49,7 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
   const marks=()=>link.state?.annotations.length||0;
   const objects=()=>link.state?.scene.objects||[];
   const selected=()=>objects().find(o=>o.id===link.state?.selected)||null;
+  const partColor=()=>{const color=selected()?.color||null;return PART_COLORS.find(choice=>choice.color===color)||{label:'Custom',color,fill:color};};
   const shorten=(name,length)=>name.length>length?`${name.slice(0,length-1)}…`:name;
   // The open project's part files, for Add (fetched when the Add ring opens).
   let projectFiles={project:null,files:null};
@@ -85,6 +89,8 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       {key:'parts',label:'Parts',aliases:['select a part','parts list'],open:'parts:0',detail:selected()?shorten(selected().name,18):`${objects().length} parts`},
       {key:'add',label:'Add part',aliases:['add','add a part'],open:'add:0',detail:link.state?.scene.source?.project?shorten(link.state.scene.source.project,18):'From a project'},
       {key:'edit',label:'Edit part',aliases:['edit','edit this part'],detail:selected()?shorten(selected().name,18):'Pick one first',primary:Boolean(selected()),press:()=>editPart()},
+      ...selected()?[{key:'color',label:'Part color',aliases:['part colour','paint part','change color','recolor'],open:'part-color',
+        detail:partColor().label,swatch:partColor().fill||partColor().color}]:[],
       {key:'reset',label:'Reset view',press:()=>fit()},
       {key:'settings',label:'Settings',open:'settings',detail:voiceCommands.on?'Voice on':'Voice off'}]},
     inspect:{title:'Inspect',value:()=>shorten(link.state?.model.name||'',14),items:()=>[
@@ -110,6 +116,9 @@ export function createWatch({scene,camera,joint,hands,link,mode,setMode,stage,se
       {key:'meaning',label:'Meaning',aliases:['color meaning'],detail:'Type or say it',press:()=>openKeyboard('meaning')}]},
     color:{title:'Mark color',items:()=>COLORS.map((color,i)=>({key:String(i),label:MEANINGS[i],fill:color,active:settings().color===color,
       press:()=>{set({color,meaning:MEANINGS[i]});back();}}))},
+    'part-color':{title:'Part color',value:()=>shorten(selected()?.name||'',14),items:()=>PART_COLORS.map(choice=>({key:choice.label.toLowerCase(),label:choice.label,
+      fill:choice.fill||choice.color,active:partColor().color===choice.color,press:()=>{const item=selected();if(!item)return;
+        link.action({type:'part_color',object_id:item.id,color:choice.color}).catch(error=>say(error.message));say(`${item.name} · ${choice.label}`);back();}}))},
     category:{title:'Edit category',items:()=>CATEGORIES.map(category=>({key:category,label:title(category),active:settings().category===category,
       press:()=>{set({category});back();}}))},
     brush:{title:'Brush radius',value:()=>`${settings().brush_radius_mm} mm`,items:()=>[step('−−',-5,['minus five','much smaller']),step('−',-.5,['minus','smaller']),

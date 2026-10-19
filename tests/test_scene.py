@@ -127,6 +127,19 @@ def test_added_parts_stand_beside_the_scene_and_parts_can_be_removed(tmp_path):
         w.action({'type': 'remove_object', 'object_id': state['scene']['objects'][0]['id']})
 
 
+def test_a_part_can_be_colored_on_every_device_and_put_back_to_gray(tmp_path):
+    w = Workspace(tmp_path)
+    vessel, stand = w.snapshot()['scene']['objects']
+    state = w.action({'type': 'part_color', 'object_id': stand['id'], 'color': '#3A7BD5'})
+    assert state['scene']['objects'][1]['color'] == '#3a7bd5' and 'color' not in state['scene']['objects'][0]
+    assert Workspace(tmp_path).snapshot()['scene']['objects'][1]['color'] == '#3a7bd5', 'Kept with the workspace'
+    for bad in ('blue', '#12345', 3):
+        with pytest.raises(ValueError, match='six-digit'):
+            w.action({'type': 'part_color', 'object_id': stand['id'], 'color': bad})
+    state = w.action({'type': 'part_color', 'object_id': stand['id'], 'color': None})
+    assert 'color' not in state['scene']['objects'][1]
+
+
 def test_a_one_model_workspace_becomes_a_scene_of_that_part(tmp_path):
     w = Workspace(tmp_path)
     old = {'schema': 1, 'revision': 3, 'settings': w.state['settings'], 'requests': [], 'transform': w.state['transform'],

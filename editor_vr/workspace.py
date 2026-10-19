@@ -269,6 +269,12 @@ class Workspace:
                     if key is None:raise ValueError('Select a part to edit first.')
                     item=self._object(key);self.state['selected']=key;self._activate(item)
                 self.state['stage']=stage;self._show()
+            elif command=='part_color':
+                # How a part is shown (on every device); None puts back the plain gray. Its marks keep their own colors.
+                item=self._object(payload.get('object_id'));color=payload.get('color')
+                if color is None:item.pop('color',None)
+                elif isinstance(color,str) and re.fullmatch('#[a-fA-F0-9]{6}',color):item['color']=color.lower()
+                else:raise ValueError('Choose a six-digit color.')
             elif command=='remove_object':
                 item=self._object(payload.get('object_id'))
                 objects=self.state['scene']['objects']

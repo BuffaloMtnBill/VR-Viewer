@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 
+// The selected part's outline: its own surface pushed out along the normals and drawn from behind, so only a rim shows
+// around its silhouette (it works in VR, where screen post-processing does not). A bright edge and a softer glow pulse.
+const OUTLINE={color:0xffb44d,edge:.0035,glow:.01,period:1.6};   // widths as angles (radians), so as thick near as far
+const OUTLINE_VERTEX=`uniform float width;
+void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position+normalize(normal)*width,1.);}`;
+const OUTLINE_FRAGMENT=`uniform vec3 color;uniform float opacity;void main(){gl_FragColor=vec4(color,opacity);}`;
+const outlineMaterial=additive=>new THREE.ShaderMaterial({vertexShader:OUTLINE_VERTEX,fragmentShader:OUTLINE_FRAGMENT,side:THREE.BackSide,transparent:true,depthWrite:false,
+  blending:additive?THREE.AdditiveBlending:THREE.NormalBlending,uniforms:{width:{value:0},color:{value:new THREE.Color(OUTLINE.color)},opacity:{value:1}}});
+
 export class ModelViewer{
   constructor(canvas){
     this.canvas=canvas;this.renderer=new THREE.WebGLRenderer({canvas,antialias:true});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0x232b34);this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.25;
@@ -19,7 +28,8 @@ export class ModelViewer{
     this.overlay=new THREE.Group();this.offset.add(this.overlay);this.previewGroup=new THREE.Group();this.offset.add(this.previewGroup);
     this.meshes=new Map();this.mesh=null;this.stage='scene';this.selected=null;this.localBusy=false;this.modelId=null;this.sceneKey=null;this.loadSerial=0;
     new ResizeObserver(()=>this.resize()).observe(canvas);this.resize();
-    this.renderer.setAnimationLoop((time,frame)=>{this.controls.enabled=!this.renderer.xr.isPresenting;this.controls.update();this.onFrame?.(time,frame);this.renderer.render(this.scene,this.renderer.xr.isPresenting?this.xrCamera:this.camera);});
+    this.outline={edge:outlineMaterial(false),glow:outlineMaterial(true),mesh:null};
+    this.renderer.setAnimationLoop((time,frame)=>{this.controls.enabled=!this.renderer.xr.isPresenting;this.controls.update();this.onFrame?.(time,frame);this.pulse(time);this.renderer.render(this.scene,this.renderer.xr.isPresenting?this.xrCamera:this.camera);});
   }
   resize(){if(this.renderer.xr.isPresenting)return;const w=this.canvas.clientWidth,h=this.canvas.clientHeight;this.renderer.setSize(w,h,false);this.camera.aspect=w/Math.max(1,h);this.camera.updateProjectionMatrix();}
   // One part's mesh: geometry in its native millimeters, with per-face centers and normals for the marking tools.
@@ -38,7 +48,9 @@ export class ModelViewer{
     for(let face=0;face<nf;face++)for(let j=0;j<3;j++)normal.fromArray(smooth,faces[face*3+j]*3).normalize().toArray(normals,face*9+j*3);
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setAttribute('normal',new THREE.BufferAttribute(normals,3));geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(nf*9).fill(.76),3));geometry.computeBoundingBox();geometry.computeBoundingSphere();
     const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.4,metalness:.12,side:THREE.DoubleSide,emissive:0x000000}));
-    mesh.name=item.name;mesh.userData={modelId:item.model_id,centers,faceNormals};return mesh;
+    mesh.name=item.name;mesh.userData={modelId:item.model_id,centers,faceNormals};
+    for(const layer of ['glow','edge']){const rim=new THREE.Mesh(geometry,this.outline[layer]);rim.name=`outline-${layer}`;rim.visible=false;rim.renderOrder=layer==='glow'?2:1;rim.raycast=()=>{};mesh.add(rim);}
+    return mesh;
   }
   // Show the workspace: every part of the scene (stage "scene"), or the part being edited alone (stage "object"),
   // centered; in the scene, the selected part glows.
@@ -47,11 +59,18 @@ export class ModelViewer{
     for(const item of objects)if(!this.meshes.has(item.model_id)){const mesh=await this.build(item);if(serial!==this.loadSerial)return false;if(!this.meshes.has(item.model_id)){this.meshes.set(item.model_id,mesh);this.parts.add(mesh);}}
     if(serial!==this.loadSerial)return false;
     const wanted=new Set(objects.map(o=>o.model_id));
-    for(const [key,mesh] of this.meshes)if(!wanted.has(key)){this.parts.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();this.meshes.delete(key);}
-    for(const item of objects)Object.assign(this.meshes.get(item.model_id).userData,{objectId:item.id,name:item.name});
+    for(const [key,mesh] of this.meshes)if(!wanted.has(key)){this.parts.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();this.meshes.delete(key);if(this.outline.mesh===mesh)this.outline.mesh=null;}
+    for(const item of objects){const mesh=this.meshes.get(item.model_id);Object.assign(mesh.userData,{objectId:item.id,name:item.name});
+      if(mesh.userData.paint!==(item.color||null)){mesh.userData.paint=item.color||null;this.fill(mesh);}}
     this.stage=state.stage;this.selected=state.selected;this.model=state.model;
     this.modelId=state.model.id;this.mesh=this.meshes.get(this.modelId)||null;
-    for(const [key,mesh] of this.meshes){mesh.visible=this.stage==='scene'||key===this.modelId;mesh.material.emissive.setHex(this.stage==='scene'&&mesh.userData.objectId===this.selected?0x3a2a12:0);}
+    this.outline.mesh=null;
+    for(const [key,mesh] of this.meshes){
+      const chosen=this.stage==='scene'&&mesh.userData.objectId===this.selected;
+      mesh.visible=this.stage==='scene'||key===this.modelId;mesh.material.emissive.setHex(chosen?0x3a2a12:0);
+      for(const rim of mesh.children)if(rim.name.startsWith('outline-'))rim.visible=chosen;
+      if(chosen)this.outline.mesh=mesh;
+    }
     const shown=this.stage==='scene'?objects:objects.filter(o=>o.model_id===this.modelId);
     const low=new THREE.Vector3(Infinity,Infinity,Infinity),high=new THREE.Vector3(-Infinity,-Infinity,-Infinity);
     for(const item of shown){low.min(new THREE.Vector3(...item.bounds_mm[0]));high.max(new THREE.Vector3(...item.bounds_mm[1]));}
@@ -59,6 +78,17 @@ export class ModelViewer{
     this.sceneKey=`${state.scene.id}:${this.stage}:${this.stage==='object'?this.modelId:''}`;
     return true;
   }
+  // The outline breathes: its edge brightens and its glow widens and fades, once every OUTLINE.period seconds.
+  pulse(time){
+    const mesh=this.outline.mesh;if(!mesh)return;
+    const beat=.5+.5*Math.sin(time/1000*Math.PI*2/OUTLINE.period),{edge,glow}=this.outline;
+    const eye=(this.renderer.xr.isPresenting?this.renderer.xr.getCamera():this.camera).getWorldPosition(new THREE.Vector3());
+    const center=mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld);
+    const scale=(mesh.matrixWorld.getMaxScaleOnAxis()||1)/Math.max(eye.distanceTo(center),.05);   // model units per radian, inverted
+    edge.uniforms.width.value=OUTLINE.edge*(.8+.4*beat)/scale;edge.uniforms.opacity.value=.55+.45*beat;
+    glow.uniforms.width.value=OUTLINE.glow*(.7+.6*beat)/scale;glow.uniforms.opacity.value=.22+.33*beat;
+  }
+  get outlined(){return this.outline.mesh?.userData.objectId||null;}
   get centers(){return this.mesh?.userData.centers||null;}
   get faceNormals(){return this.mesh?.userData.faceNormals||null;}
   transform(value,force=false){if(!value||this.localBusy&&!force)return;this.pivot.position.fromArray(value.position);this.pivot.quaternion.fromArray(value.quaternion);this.pivot.scale.setScalar(value.scale);this.pivot.updateMatrixWorld(true);}
@@ -72,8 +102,13 @@ export class ModelViewer{
     const hit=raycaster.intersectObjects([...this.meshes.values()].filter(m=>m.visible),false)[0];
     return hit?{...hit,objectId:hit.object.userData.objectId}:null;
   }
-  color(annotations,draft=null){for(const mesh of this.meshes.values())if(mesh!==this.mesh&&mesh.userData.tinted){mesh.geometry.attributes.color.array.fill(.76);mesh.geometry.attributes.color.needsUpdate=true;mesh.userData.tinted=false;}
-    if(!this.mesh)return;this.mesh.userData.tinted=true;const colors=this.mesh.geometry.attributes.color;colors.array.fill(.76);const color=new THREE.Color();for(const mark of [...annotations,...(draft?[draft]:[])]){color.set(mark.color);for(const face of mark.face_ids||[])for(let j=0;j<3;j++)color.toArray(colors.array,face*9+j*3);}colors.needsUpdate=true;this.drawMarks(annotations);}
+  // A part in its own color (the plain gray unless one was chosen), with no marks on it.
+  fill(mesh){
+    const colors=mesh.geometry.attributes.color,base=mesh.userData.paint?new THREE.Color(mesh.userData.paint):new THREE.Color(.76,.76,.76);
+    for(let i=0;i<colors.array.length;i+=3)base.toArray(colors.array,i);colors.needsUpdate=true;
+  }
+  color(annotations,draft=null){for(const mesh of this.meshes.values())if(mesh!==this.mesh&&mesh.userData.tinted){this.fill(mesh);mesh.userData.tinted=false;}
+    if(!this.mesh)return;this.mesh.userData.tinted=true;const colors=this.mesh.geometry.attributes.color;this.fill(this.mesh);const color=new THREE.Color();for(const mark of [...annotations,...(draft?[draft]:[])]){color.set(mark.color);for(const face of mark.face_ids||[])for(let j=0;j<3;j++)color.toArray(colors.array,face*9+j*3);}colors.needsUpdate=true;this.drawMarks(annotations);}
   disposeGroup(group){for(const child of [...group.children]){group.remove(child);child.geometry?.dispose();if(Array.isArray(child.material))child.material.forEach(m=>m.dispose());else child.material?.dispose();}}
   drawMarks(annotations){this.disposeGroup(this.overlay);for(const mark of annotations){if(mark.tool==='pin'){const pin=new THREE.Mesh(new THREE.SphereGeometry(Math.max(...this.model.dimensions_mm)*.012,12,8),new THREE.MeshBasicMaterial({color:mark.color,depthTest:false}));pin.position.fromArray(mark.points[0]);pin.renderOrder=5;this.overlay.add(pin);}if(mark.tool==='measure'){const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(mark.points.map(p=>new THREE.Vector3(...p))),new THREE.LineBasicMaterial({color:mark.color,depthTest:false}));line.renderOrder=5;this.overlay.add(line);}if(mark.tool==='box'&&mark.bounds_mm){const box=new THREE.Box3(...mark.bounds_mm.map(p=>new THREE.Vector3(...p)));this.overlay.add(new THREE.Box3Helper(box,mark.color));}}}
   region(bounds,color){this.disposeGroup(this.previewGroup);if(bounds)this.previewGroup.add(new THREE.Box3Helper(new THREE.Box3(...bounds.map(p=>new THREE.Vector3(...p))),color));}

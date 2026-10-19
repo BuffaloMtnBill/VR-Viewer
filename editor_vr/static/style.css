@@ -6,7 +6,7 @@
 .headset-page .studio{display:block}.headset-page .model-column{max-width:1100px;margin:0 auto}.headset-page .viewport-wrap{height:calc(100vh - 420px);min-height:320px}
 .headset-page #enter-vr{font-size:26px;padding:20px 30px;gap:30px}.headset-page .topbar{height:auto;min-height:90px}
 
-.stage-scene .part-only,.stage-object .scene-only{display:none!important}.scene-panel{margin-top:24px}.scene-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.scene-actions .primary{gap:12px}
+.stage-scene .part-only,.stage-object .scene-only{display:none!important}.scene-panel{margin-top:24px}.scene-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.scene-actions .primary{gap:12px}.part-color{display:inline-flex;align-items:center;gap:7px;cursor:pointer}.part-color:has(input:disabled){opacity:.45;cursor:default}.part-color input{width:18px;height:18px;padding:0;border:0;border-radius:50%;background:none;cursor:inherit}.part-color input::-webkit-color-swatch-wrapper{padding:0}.part-color input::-webkit-color-swatch{border:1px solid #59616f;border-radius:50%}
 .part-list{display:flex;flex-direction:column;gap:2px;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;background:#111419}
 .part-group{font-size:8px;letter-spacing:1.3px;color:#6c7686;padding:8px 6px 3px;text-transform:uppercase}
 .part-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 8px;border-radius:6px;border:1px solid transparent;font-size:11px}

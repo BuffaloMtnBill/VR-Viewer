@@ -49,6 +49,7 @@ function drawScene(state){
     }
   }
   $('edit-part').disabled=!selected;$('remove-part').disabled=!selected||state.scene.objects.length<2;
+  const chosen=state.scene.objects.find(o=>o.id===selected);$('part-color').disabled=!chosen;if(document.activeElement!==$('part-color'))$('part-color').value=chosen?.color||'#e3e3e3';
   $('import-model').title=object?'Return to the scene to add parts':'Add parts, or open files as a new scene';
 }
 function div(className,text){const node=document.createElement('div');node.className=className;if(text!==undefined)node.textContent=text;return node;}
@@ -124,6 +125,7 @@ async function showProjects(){
 }
 $('open-project').addEventListener('click',showProjects);$('close-projects').addEventListener('click',()=>$('project-dialog').close());
 $('edit-part').addEventListener('click',()=>act({type:'stage',stage:'object'}));$('back-to-scene').addEventListener('click',()=>act({type:'stage',stage:'scene'}));
+$('part-color').addEventListener('change',event=>{if(link.state.selected)act({type:'part_color',object_id:link.state.selected,color:event.target.value});});
 $('remove-part').addEventListener('click',()=>{const item=link.state.scene.objects.find(o=>o.id===link.state.selected);if(item&&confirm(`Remove ${item.name} from the scene? Its draft marks go too; files are untouched.`))act({type:'remove_object',object_id:item.id});});$('close-import').addEventListener('click',()=>$('import-dialog').close());$('choose-file').addEventListener('click',()=>$('model-file').click());
 $('model-file').addEventListener('change',async event=>{const files=[...event.target.files];event.target.value='';if(!files.length)return;if(files.reduce((n,f)=>n+f.size,0)>30*1024*1024){notify('Choose files smaller than 30 MB together, or open them as a project.',true);return;}
   if(importMode==='open'&&link.state.annotations.length&&!confirm('Open these files as a new scene and clear the draft marks? Submitted requests are kept.'))return;
