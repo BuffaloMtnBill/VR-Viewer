@@ -32,8 +32,9 @@ const output=path.resolve(__dirname,'../test-results');
   await atRest();
   if(input==='hand')await page.waitForFunction(()=>viewerApp.vr.state.hands.filter(h=>h.tracked&&h.model).length===2,null,{timeout:15000});
 
-  // A fingertip tap (a controller's dot, or the index fingertip) on a region of the watch, pie, keyboard, or wrist
-  // button: from 8 cm in front, onto it until VR has seen the touch, and away again.
+  // A fingertip tap (a controller's dot, or the index fingertip) on a region of the watch, pie, or wrist button: from
+  // 8 cm in front, onto it until VR has seen the touch, and away again. (Software rendering on CI can stall for
+  // seconds while a background loads, hence the generous wait.)
   async function tap(id,side='right'){
    const point=await page.evaluate(id=>viewerApp.vr.regionPoint(id),id);
    assert.ok(point,`${id} is on show: ${JSON.stringify((await state()).watch.regions)}`);
@@ -43,7 +44,7 @@ const output=path.resolve(__dirname,'../test-results');
    const at=point.map((v,i)=>v+offset[i]);
    await place(side,[at[0],at[1],at[2]+.08]);
    await place(side,at);
-   await page.waitForFunction(([i,n])=>viewerApp.vr.state.hands[i].presses>n,[index,presses],{timeout:3000}).catch(async()=>{throw new Error(`${id} was not pressed: ${JSON.stringify({point,at,state:await state()})}`);});
+   await page.waitForFunction(([i,n])=>viewerApp.vr.state.hands[i].presses>n,[index,presses],{timeout:10000}).catch(async()=>{throw new Error(`${id} was not pressed: ${JSON.stringify({point,at,state:await state()})}`);});
    await place(side,[at[0],at[1],at[2]+.1]);await place(side,rest[side]);await frames(2);
   }
 

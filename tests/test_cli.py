@@ -19,6 +19,7 @@ def test_local_refuses_network_hosts(host, monkeypatch, capsys, tmp_path):
 def test_local_accepts_loopback(host, url, monkeypatch, capsys, tmp_path):
     run = Mock()
     monkeypatch.setattr("flask.Flask.run", run)
+    monkeypatch.setattr(cli, "port_in_use", lambda host, port: False)   # macOS has no 127.0.0.2 to bind
     monkeypatch.setattr(sys, "argv", ["vr-viewer", "--local", "--host", host, "--port", "8099", "--no-browser", "--data-dir", str(tmp_path)])
     cli.main()
     assert run.call_args.kwargs["host"] == url.split("//")[1].rsplit(":", 1)[0].strip("[]")
