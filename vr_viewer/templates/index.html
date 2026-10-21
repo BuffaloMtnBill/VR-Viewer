@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#14171c">
+<meta name="viewer-token" content="{{ token }}"><title>VR-Viewer</title>
+<link rel="stylesheet" href="/static/style.css">
+<script nonce="{{ token }}">
+  // The headset's browser gets a simple page: the model, the connection, and a large Enter VR. ?full shows everything;
+  // ?headset shows the simple page anywhere.
+  (()=>{const query=new URLSearchParams(location.search);
+    if(!query.has('full')&&(query.has('headset')||/OculusBrowser|Quest|Pico/i.test(navigator.userAgent)))document.documentElement.classList.add('headset-page');})();
+</script>
+<script nonce="{{ token }}" type="importmap">{"imports":{"three":"/static/vendor/three.module.js"}}</script>
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">◈</span> VR<span class="brand-vr">Viewer</span><span class="edition">MODEL VIEWER</span></a>
+  <div class="connection"><i id="connection-dot"></i><span id="connection-state">Connecting…</span><span class="divider"></span><span id="peer-count">1 device</span></div>
+  <div class="header-actions"><a class="quiet headset-only" href="?full">Full page ↗</a><button id="connect-headset" class="quiet">Connect headset ↗</button><button id="enter-vr" class="primary" disabled>Enter VR <span>◉</span></button></div>
+</header>
+<main class="studio">
+  <aside class="tool-rail">
+    <div class="rail-heading"><span class="eyebrow">VIEWER</span><h1>See what<br>you made.</h1><p>Open a model. Pick a part to look at it alone.<br>Then take it into VR.</p></div>
+    <section class="scene-panel">
+      <div class="section-heading"><span>00</span><h2 id="scene-heading">Scene</h2></div>
+      <div class="scene-actions scene-only"><button id="open-files" class="quiet">Open…</button><button id="add-part" class="quiet">＋ Add part</button></div>
+      <div id="part-list" class="part-list" role="listbox" aria-label="Parts in the scene"></div>
+      <div class="scene-actions"><button id="view-part" class="primary scene-only" disabled>View part <span>▸</span></button><label class="quiet part-color scene-only" title="The selected part's color, on every device"><input id="part-color" type="color" value="#e3e3e3" disabled aria-label="Part color">Color</label><button id="remove-part" class="quiet scene-only" disabled>Remove</button><button id="back-to-scene" class="quiet part-only">◀ Back to scene</button></div>
+    </section>
+    <div class="rail-tip"><span>◇</span><p>In VR, tap the watch on your left wrist for the menus, including Open ▸ to browse for models, or just say what you want.</p></div>
+  </aside>
+  <section class="model-column">
+    <div class="headset-card headset-only"><span class="eyebrow">IN THE HEADSET</span><h2>Your model, in VR.</h2><p>Point at a part and pinch to select it; the button on your right wrist shows it alone. Tap the watch on your left wrist for the menus, and Open ▸ to choose another model.</p></div>
+    <div class="model-heading"><div><span class="eyebrow" id="model-eyebrow">SHARED SCENE</span><h2 id="model-name">Loading…</h2></div><div class="model-actions"><button id="load-demo" class="icon-button" title="Open the demo scene">◇ Demo</button><button id="import-model" class="quiet" title="Upload files from this device">＋ Upload</button><input id="model-file" type="file" accept=".stl,.obj,.3mf" multiple hidden></div></div>
+    <div class="viewport-wrap">
+      <canvas id="viewport" aria-label="Interactive model. Drag to orbit, right-drag to pan, scroll to zoom."></canvas>
+      <div class="viewport-top"><span class="view-badge" id="view-badge">SCENE</span><span id="model-dimensions">Millimeters</span></div>
+      <div class="viewport-note" id="view-hint">Click a part to select it · double-click to view it alone · drag to orbit</div>
+      <div class="viewport-controls"><button id="fit-view" title="Reset model placement and fit the view">⌖ Fit</button><button id="turn-model" title="Turn model 45 degrees">↻ Turn</button><button id="zoom-out" aria-label="Make model smaller">−</button><button id="zoom-in" aria-label="Make model larger">＋</button><button id="wireframe" aria-pressed="false">▧ Wire</button></div>
+      <div id="viewer-error" hidden></div>
+    </div>
+    <div class="model-footer"><span><i></i> <span id="model-stats">Loading geometry</span></span><span id="source-file"></span><span id="last-change">This computer</span></div>
+  </section>
+  <aside class="activity-rail">
+    <div class="activity-heading"><span class="eyebrow">SELECTED PART</span><h2 id="detail-name">Nothing selected</h2><p id="detail-note">Click a part to see its details.</p></div>
+    <dl id="part-details" class="part-details"></dl>
+    <div class="shortcut-note"><span>HAND CONTROLS</span><p>Tap menus with a fingertip.<br>Point at a part and pinch to select it.<br>Pinch on the model to hold it; a fist turns it.<br>Pinch elsewhere to drag; two hands zoom.</p></div>
+  </aside>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="headset-dialog"><div class="dialog-heading"><span class="eyebrow">ONE VIEW. TWO WAYS IN.</span><button id="close-headset" aria-label="Close">×</button></div><h2>Continue in your Quest.</h2><ol><li>Connect the headset to the same Wi-Fi as this computer.</li><li>Open the address below in Quest Browser. Accept the local certificate warning.</li><li>Pair with the six-digit PIN, then select <strong>Enter VR</strong>.</li></ol>
+<div id="headset-addresses">{% for url in headset_urls %}<code>{{ url }}</code>{% else %}<p>Start the server without <code>--local</code> to enable HTTPS and headset pairing.</p>{% endfor %}</div>
+{% if pairing_pin %}<div class="pin-display"><span>HEADSET PIN</span><strong>{{ pairing_pin }}</strong></div>{% endif %}
+<p class="dialog-footnote">A local network connection. Your models stay on this computer.</p></dialog>
+<dialog id="files-dialog" class="files-dialog"><div class="dialog-heading"><span class="eyebrow" id="files-eyebrow">OPEN A MODEL</span><button id="close-files" aria-label="Close">×</button></div>
+<h2 id="files-title">Open a model.</h2>
+<div class="segmented" id="files-mode" aria-label="What to do with the file"><button data-files="open" aria-pressed="true">Open as the scene</button><button data-files="add" aria-pressed="false">Add beside the scene</button></div>
+<nav class="crumbs" id="files-crumbs" aria-label="Folder"></nav>
+<div class="file-list" id="file-list" role="list"><p class="empty-note">Looking…</p></div>
+<div class="files-footer"><label class="field">STL and OBJ units<select id="files-units"><option value="mm">Millimeters (usual for printing)</option><option value="cm">Centimeters</option><option value="m">Meters</option></select></label><button id="open-folder" class="quiet" disabled>Open every model here</button></div>
+<p class="dialog-footnote" id="files-root">Files are read, never changed.</p></dialog>
+<dialog id="import-dialog"><div class="dialog-heading"><span class="eyebrow">FROM THIS DEVICE</span><button id="close-import" aria-label="Close">×</button></div><h2>Upload models.</h2><p>STL, OBJ, or 3MF · 30 MB per upload. A 3MF's objects, an OBJ's groups and the separate pieces of an STL each become a part; large parts are simplified for VR. Files on the computer running VR-Viewer open with <strong>Open…</strong> instead.</p>
+<div class="segmented" id="import-mode" aria-label="What to do with the files"><button data-import="add" aria-pressed="true">Add to the scene</button><button data-import="open" aria-pressed="false">Open as a new scene</button></div>
+<label class="field">File units<select id="import-units"><option value="mm">Millimeters (usual for printing)</option><option value="cm">Centimeters</option><option value="m">Meters</option></select></label><p id="import-note">Added parts stand in a row beside the scene.</p><button id="choose-file" class="primary">Choose files ↗</button></dialog>
+</body>
+</html>

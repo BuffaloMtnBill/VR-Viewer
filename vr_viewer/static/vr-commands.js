@@ -1,7 +1,6 @@
 // Voice commands in VR: the microphone stays open, and the headset itself finds where speech starts and stops (by
 // loudness against the room's background), so only short bits of speech go to the computer to be transcribed; the
 // words are then matched against the commands. Nothing is sent while you are quiet, and nothing is saved.
-import {resample,toBase64} from './vr-voice.js';
 
 const RATE=16000,CHUNK=1024;                       // 64 ms chunks
 const START_CHUNKS=2,END_MS=700,MIN_MS=350,MAX_MS=3500,PREROLL=5;
@@ -24,34 +23,44 @@ export function matchOption(text,options) {
   }
   return best;
 }
-// Said at any time in VR. "Open tools" (and "show style", "open settings", …) opens the watch's menu at that ring;
-// `menu` is the name heard. "Open menu" is matched first, so "open the menu" never reads as a menu named "the". A tool
-// is named in full ("spray paint", "pin a note") or with "tool" ("measure tool"), so a passing word does not switch it.
+// Said at any time in VR. "Open parts" (and "open files", "open settings", …) opens the watch's menu at that ring;
+// `menu` is the name heard. "Open menu" is matched first, so "open the menu" never reads as a menu named "the".
 export const COMMANDS=[
   {name:'open-menu',label:'Open menu',pattern:/\b(open|show)( the)? menu\b/},
-  {name:'open-named',label:'Open tools',pattern:/\b(?:open|show)(?: the)? (parts|tools|style|mark style|settings|backgrounds?)\b/},
-  {name:'tool',label:'Spray paint',pattern:/\b(spray|region|box|pin|measure|erase|eraser)( paint)? tool\b|\b(spray paint|3d region|pin a note|erase mark)\b/},
-  {name:'note',label:'Take a note',pattern:/\b(take|write)( a)? note\b|\bdictate\b/},
-  {name:'undo',label:'Undo',pattern:/\bundo( the)?( last)?( mark)?\b/},
-  {name:'submit',label:'Submit edit',pattern:/\bsubmit( the)?( edit| request| it)?\b/},
-  {name:'inspect',label:'Inspect mode',pattern:/\b(inspect|move) mode\b|\bswitch to inspect\b/},
-  {name:'annotate',label:'Annotate mode',pattern:/\bannotate mode\b|\bswitch to annotate\b|\bstart annotating\b/},
+  {name:'open-named',label:'Open files',pattern:/\b(?:open|show|browse)(?: the)? (parts|files|file browser|browser|settings|backgrounds?)\b|\b(browse) files\b/},
   {name:'reset',label:'Reset view',pattern:/\breset( the)? view\b/},
   {name:'stats',label:'Show stats',pattern:/\b(?:(show|hide)(?: me)?(?: the)?(?: part)? )?(?:part )?(?:stats|statistics|info|details)\b/},
   {name:'unselect',label:'Unselect',pattern:/\b(unselect|deselect)( it| this| the part)?\b|\bclear( the)? selection\b|\bselect nothing\b/},
   {name:'paint',label:'Make it blue',pattern:/\b(?:make|paint|color|colour) (?:it|this|the part) (gray|grey|red|orange|yellow|green|blue)\b/},
   {name:'part-color',label:'Change color',pattern:/\b(change|set)( the)?( part)? colou?r\b|\bpart colou?r\b/},
-  {name:'edit-part',label:'Edit part',pattern:/^edit( it| this| that)?$|\bedit( this| the| that)? (part|object)\b/},
+  {name:'view-part',label:'View part',pattern:/^view( it| this| that)?$|\bview( this| the| that)? (part|object)\b|\bshow( it| this| this part| the part)? (alone|on its own)\b/},
   {name:'scene',label:'Back to scene',pattern:/\bback to( the)? scene\b|\bshow( me)?( the)?( whole)? scene\b/},
   {name:'exit',label:'Exit program',pattern:/\b(exit|quit|close)( the)? (program|vr)\b/},
 ];
-const TOOL_WORDS={spray:'spray','spray paint':'spray',region:'box',box:'box','3d region':'box',pin:'pin','pin a note':'pin',measure:'measure',erase:'erase',eraser:'erase','erase mark':'erase'};
+const MENU_WORDS={'file browser':'files',browser:'files',browse:'files',backgrounds:'background'};
 export function matchCommand(text) {
   const heard=words(text);
   for(const command of COMMANDS){const found=heard.match(command.pattern);if(!found)continue;
-    return {...command,menu:command.name==='open-named'?found[1]:null,tool:command.name==='tool'?TOOL_WORDS[found[1]||found[3]]:null,
+    const menu=command.name==='open-named'?found[1]||found[2]:null;
+    return {...command,menu:menu?MENU_WORDS[menu]||menu:null,
       show:command.name==='stats'&&found[1]?found[1]==='show':null,color:command.name==='paint'?found[1]:null};}
   return null;
+}
+
+// Linear resampling, for browsers that will not record at 16 kHz themselves.
+export function resample(samples,from) {
+  if(from===RATE)return samples;
+  const out=new Float32Array(Math.floor(samples.length*RATE/from));
+  for(let i=0;i<out.length;i++){const x=i*from/RATE,j=Math.floor(x),f=x-j;out[i]=samples[j]*(1-f)+(samples[j+1]??samples[j])*f;}
+  return out;
+}
+// 16-bit samples, base64-encoded, as the computer expects them.
+export function toBase64(samples) {
+  const pcm=new Int16Array(samples.length);
+  for(let i=0;i<samples.length;i++)pcm[i]=Math.max(-32768,Math.min(32767,Math.round(samples[i]*32767)));
+  const bytes=new Uint8Array(pcm.buffer);let text='';
+  for(let i=0;i<bytes.length;i+=0x8000)text+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+  return btoa(text);
 }
 
 export function createCommands({api,onHeard,onError,vocabulary=()=>[]}) {

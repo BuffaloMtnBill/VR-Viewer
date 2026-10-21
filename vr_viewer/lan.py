@@ -1,4 +1,4 @@
-"""Serving Editor-VR to other devices on the local network, such as a VR headset.
+"""Serving VR-Viewer to other devices on the local network, such as a VR headset.
 
 Browsers allow WebXR only on secure pages, so LAN mode serves HTTPS with a self-signed certificate made for this
 computer's addresses. The headset asks once to trust it."""
@@ -34,7 +34,7 @@ def certificate(folder, hosts):
     except ImportError:
         raise SystemExit("LAN mode needs the 'cryptography' package: python -m pip install cryptography") from None
     folder = Path(folder)
-    cert_path, key_path, hosts_path = folder / "editor-vr.crt", folder / "editor-vr.key", folder / "hosts.txt"
+    cert_path, key_path, hosts_path = folder / "vr-viewer.crt", folder / "vr-viewer.key", folder / "hosts.txt"
     wanted = "\n".join(sorted(set(hosts)))
     if cert_path.exists() and key_path.exists() and hosts_path.exists() and hosts_path.read_text() == wanted:
         cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
@@ -47,7 +47,7 @@ def certificate(folder, hosts):
         except ValueError:
             names.append(x509.DNSName(host))
     key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Editor-VR (local network)")])
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "VR-Viewer (local network)")])
     now = datetime.now(timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject).public_key(key.public_key())
             .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=1))

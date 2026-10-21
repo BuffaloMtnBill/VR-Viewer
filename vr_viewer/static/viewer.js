@@ -25,34 +25,32 @@ export class ModelViewer{
     // pivot (the shared placement) › content (model Z-up to view Y-up) › offset (centers what is shown) › one mesh per part
     this.pivot=new THREE.Group();this.scene.add(this.pivot);this.content=new THREE.Group();this.content.rotation.x=-Math.PI/2;this.pivot.add(this.content);
     this.offset=new THREE.Group();this.content.add(this.offset);this.parts=new THREE.Group();this.offset.add(this.parts);
-    this.overlay=new THREE.Group();this.offset.add(this.overlay);this.previewGroup=new THREE.Group();this.offset.add(this.previewGroup);
     this.meshes=new Map();this.mesh=null;this.stage='scene';this.selected=null;this.localBusy=false;this.modelId=null;this.sceneKey=null;this.loadSerial=0;
     new ResizeObserver(()=>this.resize()).observe(canvas);this.resize();
     this.outline={edge:outlineMaterial(false),glow:outlineMaterial(true),mesh:null};
     this.renderer.setAnimationLoop((time,frame)=>{this.controls.enabled=!this.renderer.xr.isPresenting;this.controls.update();this.onFrame?.(time,frame);this.pulse(time);this.renderer.render(this.scene,this.renderer.xr.isPresenting?this.xrCamera:this.camera);});
   }
   resize(){if(this.renderer.xr.isPresenting)return;const w=this.canvas.clientWidth,h=this.canvas.clientHeight;this.renderer.setSize(w,h,false);this.camera.aspect=w/Math.max(1,h);this.camera.updateProjectionMatrix();}
-  // One part's mesh: geometry in its native millimeters, with per-face centers and normals for the marking tools.
+  // One part's mesh: geometry in its native millimeters, smooth-shaded, with a color per vertex (the part's color).
   async build(item){
     const response=await fetch(`/api/models/${item.model_id}/mesh`);if(!response.ok)throw new Error(`${item.name} could not be loaded.`);const data=await response.arrayBuffer();
     const header=new DataView(data);if(header.getUint32(0,true)!==0x31525645)throw new Error('Unrecognized mesh data.');const nv=header.getUint32(4,true),nf=header.getUint32(8,true);
     const vertices=new Float32Array(data,12,nv*3),faces=new Uint32Array(data,12+nv*12,nf*3);
-    const positions=new Float32Array(nf*9),smooth=new Float32Array(nv*3),normals=new Float32Array(nf*9),centers=new Float32Array(nf*3),faceNormals=new Float32Array(nf*3);
+    const positions=new Float32Array(nf*9),smooth=new Float32Array(nv*3),normals=new Float32Array(nf*9);
     const a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3(),normal=new THREE.Vector3();
     for(let face=0;face<nf;face++){
       a.fromArray(vertices,faces[face*3]*3);b.fromArray(vertices,faces[face*3+1]*3);c.fromArray(vertices,faces[face*3+2]*3);
       normal.subVectors(b,a).cross(new THREE.Vector3().subVectors(c,a));
-      for(let j=0;j<3;j++){const index=faces[face*3+j]*3;for(let k=0;k<3;k++){positions[face*9+j*3+k]=vertices[index+k];smooth[index+k]+=normal.getComponent(k);centers[face*3+k]+=vertices[index+k]/3;}}
-      normal.normalize().toArray(faceNormals,face*3);
+      for(let j=0;j<3;j++){const index=faces[face*3+j]*3;for(let k=0;k<3;k++){positions[face*9+j*3+k]=vertices[index+k];smooth[index+k]+=normal.getComponent(k);}}
     }
     for(let face=0;face<nf;face++)for(let j=0;j<3;j++)normal.fromArray(smooth,faces[face*3+j]*3).normalize().toArray(normals,face*9+j*3);
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));geometry.setAttribute('normal',new THREE.BufferAttribute(normals,3));geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(nf*9).fill(.76),3));geometry.computeBoundingBox();geometry.computeBoundingSphere();
     const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:.4,metalness:.12,side:THREE.DoubleSide,emissive:0x000000}));
-    mesh.name=item.name;mesh.userData={modelId:item.model_id,centers,faceNormals};
+    mesh.name=item.name;mesh.userData={modelId:item.model_id};
     for(const layer of ['glow','edge']){const rim=new THREE.Mesh(geometry,this.outline[layer]);rim.name=`outline-${layer}`;rim.visible=false;rim.renderOrder=layer==='glow'?2:1;rim.raycast=()=>{};mesh.add(rim);}
     return mesh;
   }
-  // Show the workspace: every part of the scene (stage "scene"), or the part being edited alone (stage "object"),
+  // Show the workspace: every part of the scene (stage "scene"), or one part alone (stage "object"),
   // centered; in the scene, the selected part glows.
   async show(state){
     const serial=++this.loadSerial,objects=state.scene.objects;
@@ -89,28 +87,19 @@ export class ModelViewer{
     glow.uniforms.width.value=OUTLINE.glow*(.7+.6*beat)/scale;glow.uniforms.opacity.value=.22+.33*beat;
   }
   get outlined(){return this.outline.mesh?.userData.objectId||null;}
-  get centers(){return this.mesh?.userData.centers||null;}
-  get faceNormals(){return this.mesh?.userData.faceNormals||null;}
   transform(value,force=false){if(!value||this.localBusy&&!force)return;this.pivot.position.fromArray(value.position);this.pivot.quaternion.fromArray(value.quaternion);this.pivot.scale.setScalar(value.scale);this.pivot.updateMatrixWorld(true);}
   currentTransform(){return {position:this.pivot.position.toArray(),quaternion:this.pivot.quaternion.toArray(),scale:this.pivot.scale.x};}
   fitCamera(){this.controls.target.copy(this.pivot.position);this.camera.position.copy(this.pivot.position).add(new THREE.Vector3(.75,.43,1.4));this.controls.update();}
-  local(world){return this.mesh.worldToLocal(world.clone());}
-  world(local){return this.mesh.localToWorld(local.clone());}
   hit(raycaster){
     this.pivot.updateMatrixWorld(true);
     if(this.stage==='object')return this.mesh?raycaster.intersectObject(this.mesh,false)[0]||null:null;
     const hit=raycaster.intersectObjects([...this.meshes.values()].filter(m=>m.visible),false)[0];
     return hit?{...hit,objectId:hit.object.userData.objectId}:null;
   }
-  // A part in its own color (the plain gray unless one was chosen), with no marks on it.
+  // A part in its own color (the plain gray unless one was chosen).
   fill(mesh){
     const colors=mesh.geometry.attributes.color,base=mesh.userData.paint?new THREE.Color(mesh.userData.paint):new THREE.Color(.76,.76,.76);
     for(let i=0;i<colors.array.length;i+=3)base.toArray(colors.array,i);colors.needsUpdate=true;
   }
-  color(annotations,draft=null){for(const mesh of this.meshes.values())if(mesh!==this.mesh&&mesh.userData.tinted){this.fill(mesh);mesh.userData.tinted=false;}
-    if(!this.mesh)return;this.mesh.userData.tinted=true;const colors=this.mesh.geometry.attributes.color;this.fill(this.mesh);const color=new THREE.Color();for(const mark of [...annotations,...(draft?[draft]:[])]){color.set(mark.color);for(const face of mark.face_ids||[])for(let j=0;j<3;j++)color.toArray(colors.array,face*9+j*3);}colors.needsUpdate=true;this.drawMarks(annotations);}
-  disposeGroup(group){for(const child of [...group.children]){group.remove(child);child.geometry?.dispose();if(Array.isArray(child.material))child.material.forEach(m=>m.dispose());else child.material?.dispose();}}
-  drawMarks(annotations){this.disposeGroup(this.overlay);for(const mark of annotations){if(mark.tool==='pin'){const pin=new THREE.Mesh(new THREE.SphereGeometry(Math.max(...this.model.dimensions_mm)*.012,12,8),new THREE.MeshBasicMaterial({color:mark.color,depthTest:false}));pin.position.fromArray(mark.points[0]);pin.renderOrder=5;this.overlay.add(pin);}if(mark.tool==='measure'){const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(mark.points.map(p=>new THREE.Vector3(...p))),new THREE.LineBasicMaterial({color:mark.color,depthTest:false}));line.renderOrder=5;this.overlay.add(line);}if(mark.tool==='box'&&mark.bounds_mm){const box=new THREE.Box3(...mark.bounds_mm.map(p=>new THREE.Vector3(...p)));this.overlay.add(new THREE.Box3Helper(box,mark.color));}}}
-  region(bounds,color){this.disposeGroup(this.previewGroup);if(bounds)this.previewGroup.add(new THREE.Box3Helper(new THREE.Box3(...bounds.map(p=>new THREE.Vector3(...p))),color));}
   wireframe(value){for(const mesh of this.meshes.values())mesh.material.wireframe=value;}
 }

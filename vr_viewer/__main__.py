@@ -5,7 +5,7 @@ import socket
 from threading import Thread
 import time
 import webbrowser
-from .server import create_app
+from .server import create_app,read_parts
 from .lan import certificate,local_addresses
 from .pairing import Pairing
 
@@ -40,16 +40,24 @@ def port_in_use(host,port):
 
 
 def main():
-    parser=argparse.ArgumentParser(description='Editor-VR: shared desktop and Quest model annotation')
+    parser=argparse.ArgumentParser(prog='vr-viewer',description='VR-Viewer: view 3D models on the desktop and in a Quest headset')
+    parser.add_argument('paths',nargs='*',type=Path,metavar='MODEL',help='STL, OBJ or 3MF files (or a folder of them) to open')
+    parser.add_argument('--units',choices=('mm','cm','m'),default='mm',help='Units of the STL and OBJ files opened here (default mm)')
+    parser.add_argument('--root',type=Path,help='The folder the file browser may show (default your home folder, or VR_VIEWER_ROOT)')
     parser.add_argument('--port',type=int,default=8000)
     parser.add_argument('--host',help='Listen address; defaults to all interfaces for the headset')
     parser.add_argument('--local',action='store_true',help='Desktop-only HTTP on loopback')
     parser.add_argument('--no-browser',action='store_true')
-    parser.add_argument('--data-dir',type=Path)
-    parser.add_argument('--models',type=Path,help='Folder of model projects to open (default ~/Projects/Models, or EDITOR_VR_MODELS)')
+    parser.add_argument('--data-dir',type=Path,help='Where to keep working copies, the certificate and paired devices')
     parser.add_argument('--forget-devices',action='store_true')
     args=parser.parse_args()
     if not 1024<=args.port<=65535:parser.error('Port must be 1024–65535.')
+    if args.root and not args.root.expanduser().is_dir():parser.error(f'--root {args.root} is not a folder.')
+    # The models named here are read first, so a mistyped path stops before anything starts.
+    opened=None
+    if args.paths:
+        try:opened=read_parts(args.paths,args.units)
+        except (ValueError,OSError) as error:parser.exit(1,f'vr-viewer: {error}\n')
     host=args.host or ('127.0.0.1' if args.local else '0.0.0.0')
     if args.local:
         # No pairing or TLS here, so never on the network; localhost is pinned to its address rather than resolved.
@@ -57,11 +65,17 @@ def main():
         try:loopback=ipaddress.ip_address(host).is_loopback
         except ValueError:loopback=False
         if not loopback:parser.error('--local must listen on a loopback address. Use default HTTPS for the network.')
-    # Another server on this port (3D-VR-Terrain shares 8000): do not start alongside it.
+    # Another server on this port: do not start alongside it.
     if port_in_use(host,args.port):
-        parser.exit(1,f'Port {args.port} is already in use (perhaps by 3D-VR-Terrain or another Editor-VR). '
+        parser.exit(1,f'Port {args.port} is already in use by another program (perhaps another VR-Viewer). '
             f'Stop that server, or start this one with --port <another port>.\n')
-    app=create_app(args.data_dir,models_dir=args.models)
+    start=args.paths[0].expanduser().resolve() if args.paths else None
+    app=create_app(args.data_dir,root=args.root,start=(start if start.is_dir() else start.parent) if start else None)
+    workspace=app.extensions['vr_viewer']['workspace']
+    if opened:
+        parts,name,files=opened
+        try:workspace.open_scene(parts,name,{'kind':'files','folder':str(start if start.is_dir() else start.parent),'files':[str(f) for f in files]})
+        except ValueError as error:parser.exit(1,f'vr-viewer: {error}\n')
     ssl_context=None; pairing=None
     if args.local:
         url=f'http://[{host}]:{args.port}' if ':' in host else f'http://{host}:{args.port}'
@@ -71,19 +85,20 @@ def main():
         hosts=['localhost','127.0.0.1',hostname,*addresses]
         if host not in ('0.0.0.0','::'):hosts.append(host)
         app.config['TRUSTED_HOSTS']=list(dict.fromkeys([*app.config['TRUSTED_HOSTS'],*hosts]))
-        folder=app.extensions['editor_vr']['workspace'].folder/'tls'
+        folder=workspace.folder/'tls'
         ssl_context=tuple(map(str,certificate(folder,hosts)))
-        fixed=os.environ.get('EDITOR_VR_PAIRING_PIN')
-        if fixed is not None and (len(fixed)!=6 or not fixed.isdigit()):parser.error('EDITOR_VR_PAIRING_PIN must contain six digits.')
+        fixed=os.environ.get('VR_VIEWER_PAIRING_PIN')
+        if fixed is not None and (len(fixed)!=6 or not fixed.isdigit()):parser.error('VR_VIEWER_PAIRING_PIN must contain six digits.')
         pairing=Pairing(folder,fixed)
         if args.forget_devices:pairing.forget_all()
         app.config['PAIRING']=pairing
         app.config['HEADSET_URLS']=[f'https://{ip}:{args.port}' for ip in addresses] or [f'https://{hostname}:{args.port}']
         url=f'https://localhost:{args.port}'
-    print(f'\nEditor-VR desktop: {url}',flush=True)
+    if opened:print(f'\nOpened {opened[1]}: {len(workspace.state["scene"]["objects"])} part(s).',flush=True)
+    print(f'\nVR-Viewer desktop: {url}',flush=True)
     if pairing:
         print('Quest: '+ ' or '.join(app.config['HEADSET_URLS'])+'\nAccept the local certificate warning, then pair with PIN: '+pairing.pin,flush=True)
-    print('Data: '+str(app.extensions['editor_vr']['workspace'].folder)+'\nPress Ctrl+C to stop.\n',flush=True)
+    print('Data: '+str(workspace.folder)+'\nFiles: '+str(app.extensions['vr_viewer']['root'])+'\nPress Ctrl+C to stop.\n',flush=True)
     if not args.no_browser:Thread(target=open_when_ready,args=(url,args.port),daemon=True).start()
     app.run(host=host,port=args.port,ssl_context=ssl_context,threaded=True,debug=False)
 

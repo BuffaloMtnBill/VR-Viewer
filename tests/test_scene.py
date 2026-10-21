@@ -1,16 +1,15 @@
-"""Scenes of parts, as the Visualizer sees a model: loading them, editing one part at a time, and model projects."""
+"""Scenes of parts, as the Visualizer sees a model: loading them, viewing one part at a time, and the file browser."""
 import io
 import json
 import re
-import uuid
 import zipfile
 
 import numpy as np
 import pytest
 
-from editor_vr import mesh
-from editor_vr.server import create_app
-from editor_vr.workspace import Workspace
+from vr_viewer import mesh
+from vr_viewer.server import create_app, read_parts
+from vr_viewer.workspace import Workspace
 
 
 def cube(size=10, at=(0, 0, 0)):
@@ -83,7 +82,7 @@ def test_large_parts_are_simplified_for_vr_and_the_scene_fits_its_budget():
     assert sum(len(p['faces']) for p in fitted) <= 8_000 and fitted[0]['source_triangles'] == part['source_triangles']
 
 
-def test_the_scene_stage_selection_and_marks_belong_to_each_part(tmp_path):
+def test_the_scene_and_one_part_alone(tmp_path):
     w = Workspace(tmp_path)
     vessel, stand = w.state['scene']['objects']
     assert w.state['stage'] == 'scene' and w.state['selected'] is None
@@ -92,24 +91,11 @@ def test_the_scene_stage_selection_and_marks_belong_to_each_part(tmp_path):
     state = w.action({'type': 'stage', 'stage': 'object'})
     assert state['model']['id'] == stand['model_id'] and state['model']['name'] == 'Stand'
     assert state['transform']['scale'] == pytest.approx(.55 / 80), 'The part alone fills the table'
-    mark = {'id': uuid.uuid4().hex, 'tool': 'pin', 'face_ids': [0], 'points': [[0, 0, 0]], 'color': '#ffb86b', 'meaning': 'Here', 'category': 'size', 'description': '', 'brush_radius_mm': 6}
-    w.action({'type': 'annotate', 'model_id': stand['model_id'], 'annotation': mark})
-    # Another part: its own (empty) marks; the stand's wait, counted in the scene.
     state = w.action({'type': 'stage', 'stage': 'object', 'object_id': vessel['id']})
-    assert state['model']['name'] == 'Fluted vessel' and state['annotations'] == []
-    assert {o['name']: o['marks'] for o in state['scene']['objects']} == {'Fluted vessel': 0, 'Stand': 1}
-    with pytest.raises(ValueError, match='part being edited changed'):
-        w.action({'type': 'annotate', 'model_id': stand['model_id'], 'annotation': {**mark, 'id': uuid.uuid4().hex}})
-    state = w.action({'type': 'stage', 'stage': 'object', 'object_id': stand['id']})
-    assert len(state['annotations']) == 1
-    w.action({'type': 'settings', 'changes': {'description': 'Thicken the rim'}})
-    state = w.submit({'id': uuid.uuid4().hex, 'model_id': stand['model_id'], 'description': 'Thicken the rim'})
-    request = state['requests'][0]
-    assert (request['model_name'], request['object_id'], request['scene']) == ('Stand', stand['id'], 'Fluted study vessel')
-    with zipfile.ZipFile(tmp_path / 'requests' / f"{request['id']}.zip") as archive:
-        packet = json.loads(archive.read('annotations.json'))
-    assert packet['name'] == 'Stand' and packet['scene'] == 'Fluted study vessel' and packet['simplified_for_vr'] is False
+    assert state['model']['name'] == 'Fluted vessel' and state['selected'] == vessel['id']
     assert w.action({'type': 'stage', 'stage': 'scene'})['transform']['scale'] == pytest.approx(.55 / 102)
+    for bad in ({'type': 'stage', 'stage': 'nowhere'}, {'type': 'select', 'object_id': 'x'}, {'type': 'annotate'}):
+        with pytest.raises(ValueError): w.action(bad)
 
 
 def test_added_parts_stand_beside_the_scene_and_parts_can_be_removed(tmp_path):
@@ -149,62 +135,104 @@ def test_a_part_can_be_colored_on_every_device_and_put_back_to_gray(tmp_path):
     assert 'color' not in state['scene']['objects'][1]
 
 
-def test_a_one_model_workspace_becomes_a_scene_of_that_part(tmp_path):
+def test_working_copies_of_parts_go_with_their_scene(tmp_path):
     w = Workspace(tmp_path)
-    old = {'schema': 1, 'revision': 3, 'settings': w.state['settings'], 'requests': [], 'transform': w.state['transform'],
-           'model': {**w.state['model'], 'name': 'Old vase', 'source': 'Uploaded mesh'},
-           'annotations': [{'id': uuid.uuid4().hex, 'tool': 'pin', 'face_ids': [1], 'points': [[0, 0, 0]]}]}
-    old['model'].pop('object_id')
-    (tmp_path / 'workspace.json').write_text(json.dumps(old))
-    state = Workspace(tmp_path).snapshot()
-    assert [o['name'] for o in state['scene']['objects']] == ['Old vase'] and state['stage'] == 'object'
-    assert len(state['annotations']) == 1 and state['model']['object_id'] == state['selected']
+    first = {o['model_id'] for o in w.state['scene']['objects']}
+    v, f = cube(20)
+    state = w.open_scene([mesh.part_record('A', v, f), mesh.part_record('B', *cube(5, (30, 0, 0)))], 'Two')
+    kept = {p.stem for p in (tmp_path / 'models').glob('*.npz')}
+    assert kept == {o['model_id'] for o in state['scene']['objects']} and not kept & first
+    state = w.action({'type': 'remove_object', 'object_id': state['scene']['objects'][1]['id']})
+    assert {p.stem for p in (tmp_path / 'models').glob('*.npz')} == {state['scene']['objects'][0]['model_id']}
+
+
+def test_a_workspace_from_elsewhere_starts_afresh(tmp_path):
+    (tmp_path / 'workspace.json').write_text(json.dumps({'schema': 2, 'revision': 9, 'marks': []}))
+    assert Workspace(tmp_path).snapshot()['scene']['name'] == 'Fluted study vessel'
+    (tmp_path / 'workspace.json').write_text('not json')
+    assert Workspace(tmp_path).snapshot()['scene']['name'] == 'Fluted study vessel'
 
 
 @pytest.fixture
-def projects(tmp_path):
-    root = tmp_path / 'Models'
-    (root / 'Castle' / 'preview').mkdir(parents=True); (root / 'Castle' / 'stl').mkdir()
+def home(tmp_path):
+    """A home folder with models in it, and the viewer showing it."""
+    root = tmp_path / 'home'
+    (root / 'Models' / 'Castle' / 'preview').mkdir(parents=True); (root / 'Models' / 'Castle' / 'stl').mkdir()
     v, f = cube()
-    (root / 'Castle' / 'preview' / 'castle_assembled.3mf').write_bytes(three_mf([('Tower', v, f, None, 'Walls', '../stl/tower.stl'), ('Gate', v, f, '1 0 0 0 1 0 0 0 1 20 0 0', 'Doors', None)]))
-    (root / 'Castle' / 'stl' / 'tower.stl').write_bytes(binary_stl(cube()))
-    (root / 'Castle' / 'stl' / 'flag.stl').write_bytes(binary_stl(cube(5), cube(5, at=(10, 0, 0))))
-    (root / 'Loose').mkdir(); (root / 'Loose' / 'part.stl').write_bytes(binary_stl(cube()))
-    (root / 'Empty').mkdir()
+    (root / 'Models' / 'Castle' / 'preview' / 'castle_assembled.3mf').write_bytes(three_mf([('Tower', v, f, None, 'Walls', '../stl/tower.stl'), ('Gate', v, f, '1 0 0 0 1 0 0 0 1 20 0 0', 'Doors', None)]))
+    (root / 'Models' / 'Castle' / 'stl' / 'tower.stl').write_bytes(binary_stl(cube()))
+    (root / 'Models' / 'Castle' / 'stl' / 'flag.stl').write_bytes(binary_stl(cube(5), cube(5, at=(10, 0, 0))))
+    (root / 'Models' / 'Castle' / 'notes.txt').write_text('not a model')
+    (root / 'Models' / '.hidden').mkdir(); (root / 'Models' / '.hidden' / 'h.stl').write_bytes(binary_stl(cube()))
     (tmp_path / 'secret.stl').write_bytes(binary_stl(cube()))
-    app = create_app(tmp_path / 'data', models_dir=root)
+    (root / 'Models' / 'outside').symlink_to(tmp_path)
+    app = create_app(tmp_path / 'data', root=root, start=root / 'Models')
     client = app.test_client()
-    token = re.search(rb'name="editor-token" content="([^"]+)"', client.get('/').data).group(1).decode()
-    return client, {'X-Editor-Token': token}
+    token = re.search(rb'name="viewer-token" content="([^"]+)"', client.get('/').data).group(1).decode()
+    return client, {'X-Viewer-Token': token}
 
 
-def test_model_projects_are_listed_and_opened(projects):
-    client, headers = projects
-    listed = client.get('/api/projects').json['projects']
-    assert [(p['name'], p['scenes'], p['parts']) for p in listed] == [
-        ('Castle', ['preview/castle_assembled.3mf'], ['stl/flag.stl', 'stl/tower.stl']), ('Loose', [], ['part.stl'])]
-    state = client.post('/api/projects/open', headers=headers, json={'project': 'Castle'}).json
-    assert state['scene']['name'] == 'Castle · castle_assembled' and state['scene']['source'] == {'project': 'Castle', 'file': 'preview/castle_assembled.3mf'}
+def test_the_file_browser_lists_folders_and_model_files(home):
+    client, _ = home
+    listed = client.get('/api/files').json
+    assert listed['path'] == 'Models' and listed['parent'] == '' and listed['name'] == 'Models'
+    assert [f['name'] for f in listed['folders']] == ['Castle'], 'No hidden folders, and no links out of the root'
+    castle = client.get('/api/files?path=Models/Castle').json
+    assert [f['name'] for f in castle['folders']] == ['preview', 'stl'] and castle['files'] == []
+    stl = client.get('/api/files?path=Models/Castle/stl').json
+    assert [(f['name'], f['path']) for f in stl['files']] == [('flag.stl', 'Models/Castle/stl/flag.stl'), ('tower.stl', 'Models/Castle/stl/tower.stl')]
+    assert client.get('/api/files?path=').json['parent'] is None
+
+
+def test_files_open_as_the_scene_or_beside_it(home):
+    client, headers = home
+    state = client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/preview/castle_assembled.3mf'}).json
+    assert state['scene']['name'] == 'castle_assembled' and state['scene']['source']['kind'] == 'files'
     assert [(o['name'], o['category'], o['print_file']) for o in state['scene']['objects']] == [('Tower', 'Walls', '../stl/tower.stl'), ('Gate', 'Doors', None)]
-    # A project's print file is one part, even when it holds separate pieces.
-    state = client.post('/api/projects/add', headers=headers, json={'project': 'Castle', 'file': 'stl/flag.stl'}).json
-    assert [o['name'] for o in state['scene']['objects']][-1] == 'flag' and state['scene']['objects'][-1]['print_file'] == 'stl/flag.stl'
-    # Without an assembled scene, every part file, side by side.
-    state = client.post('/api/projects/open', headers=headers, json={'project': 'Loose'}).json
-    assert [o['name'] for o in state['scene']['objects']] == ['part']
+    assert state['scene']['objects'][0]['source_file'].endswith('castle_assembled.3mf')
+    # The browser now opens in the model's folder.
+    assert client.get('/api/files').json['path'] == 'Models/Castle/preview'
+    # Added: one file is one part, even when it holds separate pieces.
+    state = client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/stl/flag.stl', 'mode': 'add'}).json
+    assert [o['name'] for o in state['scene']['objects']] == ['Tower', 'Gate', 'flag']
+    # Opened alone, an STL's separate pieces are parts; a folder opens every model file in it.
+    state = client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/stl/flag.stl'}).json
+    assert [o['name'] for o in state['scene']['objects']] == ['flag 1', 'flag 2']
+    state = client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/stl'}).json
+    assert state['scene']['name'] == 'stl' and [o['name'] for o in state['scene']['objects']] == ['flag', 'tower']
 
 
-@pytest.mark.parametrize('payload', [{'project': '../data'}, {'project': '..'}, {'project': 'Castle/../..'}, {'project': 'Empty'},
-                                     {'project': 'Castle', 'file': '../../secret.stl'}, {'project': 'Castle', 'file': '/etc/passwd'}])
-def test_projects_stay_inside_the_models_folder(projects, payload):
-    client, headers = projects
-    route = '/api/projects/add' if 'file' in payload else '/api/projects/open'
-    response = client.post(route, headers=headers, json=payload)
-    assert response.status_code == 400
+@pytest.mark.parametrize('path', ['../secret.stl', '/etc/passwd', 'Models/../../secret.stl', 'Models/outside/secret.stl', 'Models/Castle/notes.txt', 'Models/missing.stl', 'Models/Castle', 7])
+def test_the_file_browser_stays_inside_its_root(home, path):
+    client, headers = home
+    before = client.get('/api/workspace').json['revision']
+    assert client.post('/api/files/open', headers=headers, json={'path': path}).status_code == 400
+    assert client.get('/api/workspace').json['revision'] == before
 
 
-def test_uploads_add_to_the_scene_or_open_a_new_one(projects):
-    client, headers = projects
+@pytest.mark.parametrize('path', ['..', '/etc', 'Models/../..', 'Models/outside', 'Models/missing'])
+def test_browsing_stays_inside_the_root(home, path):
+    client, _ = home
+    assert client.get('/api/files', query_string={'path': path}).status_code == 400
+
+
+def test_opening_files_needs_the_page_token(home):
+    client, _ = home
+    assert client.post('/api/files/open', json={'path': 'Models/Castle/stl/flag.stl'}).status_code == 403
+
+
+def test_reading_parts_from_the_command_line(home, tmp_path):
+    parts, name, files = read_parts([tmp_path / 'home' / 'Models' / 'Castle' / 'stl' / 'tower.stl'])
+    assert name == 'tower' and len(parts) == 1 and parts[0]['source_file'].endswith('tower.stl')
+    parts, name, files = read_parts([tmp_path / 'home' / 'Models' / 'Castle' / 'stl'])
+    assert name == 'stl' and [p['name'] for p in parts] == ['flag', 'tower']
+    for bad, message in ((tmp_path / 'nowhere.stl', 'not found'), (tmp_path / 'home' / 'Models' / 'Castle' / 'notes.txt', 'not an STL'),
+                         (tmp_path / 'home' / 'Models' / 'Castle', 'no STL')):
+        with pytest.raises(ValueError, match=message): read_parts([bad])
+
+
+def test_uploads_add_to_the_scene_or_open_a_new_one(home):
+    client, headers = home
     stl = binary_stl(cube(), cube(at=(30, 0, 0)))
     state = client.post('/api/models', headers=headers, data={'model': (io.BytesIO(stl), 'pair.stl')}).json
     assert [o['name'] for o in state['scene']['objects']][-2:] == ['pair 1', 'pair 2'] and len(state['scene']['objects']) == 4

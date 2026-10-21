@@ -12,7 +12,7 @@ import secrets
 from threading import Lock
 import time
 
-COOKIE = "editor_vr_paired"
+COOKIE = "vr_viewer_paired"
 MAX_FAILURES = 5          # wrong PINs allowed per window before pairing pauses
 FAILURE_WINDOW = 300      # seconds
 LOCKOUT = 60              # seconds pairing pauses after too many wrong PINs

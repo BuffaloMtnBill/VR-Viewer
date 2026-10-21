@@ -1,19 +1,18 @@
-// VR for the shared workspace (WebXR, e.g. a Meta Quest on the LAN), with hands or controllers. The scene comes first:
-// point a laser at a part and pinch (or pull the trigger) to select it. The model (the scene, or the part being
-// edited) is handled as in 3D-VR-Terrain's model view:
+// VR for the shared view (WebXR, e.g. a Meta Quest on the LAN), with hands or controllers. The scene comes first:
+// point a laser at a part and pinch (or pull the trigger) to select it. The model (the scene, or one part shown on
+// its own) is handled as in 3D-VR-Terrain's model view:
 // - a fist (a controller's grip button) turns it as the fist turns, about its center;
 // - a pinch on the model itself (or the trigger, touching it) picks it up and carries it as if in your hand;
 // - a pinch anywhere else (the trigger) drags it, and with both hands zooms it and turns it about the vertical.
-// In Annotate, a laser from each hand marks the part with the chosen tool (a pinch, or the trigger) and a fist still
-// turns it. The interface is tapped with a fingertip: the watch on the left wrist opens the menus, and the button on
-// the right wrist switches to Annotate, then submits. Voice commands run throughout. The model's placement is shared
-// with every device; the view (and the room around it) is your own.
+// The interface is tapped with a fingertip: the watch on the left wrist opens the menus (and Open ▸ browses the
+// computer's model files), and the button on the right wrist shows the selected part alone, then the scene again.
+// Voice commands run throughout. The model's placement is shared with every device; the view (and the room around it)
+// is your own.
 import * as THREE from 'three';
 import {createHandSkin} from './vr-hands.js';
-import {createAnnotate} from './vr-annotate.js';
+import {createLaser} from './vr-laser.js';
 import {createWatch} from './vr-watch.js';
 import {COMMANDS,createCommands,matchCommand,matchOption} from './vr-commands.js';
-import {TOOL_NAMES} from './tools.js';
 import {ENVIRONMENTS,createEnvironments} from './vr-environments.js';
 
 const PINCH={press:.018,release:.025};   // thumb-to-index distance (m) that starts and ends a pinch
@@ -49,25 +48,25 @@ let instance=null;
 // The VR controller for this page, for the browser tests.
 export const currentVR=()=>instance;
 
-export function createVR(viewer,link,tools,ctx) {
+export function createVR(viewer,link,ctx) {
   const {renderer,scene}=viewer;
   const camera=new THREE.PerspectiveCamera(70,1,.01,30);scene.add(camera);viewer.xrCamera=camera;
-  let session=null,grab=null,lastTransform=0,lastTime=null,voiceOn=true,modeOverride=null;
+  let session=null,grab=null,lastTransform=0,lastTime=null,voiceOn=true;
 
   // ---------- the room around the model ----------
   // The room is your own (the desktop keeps the studio); a living one runs on its own day clock.
   const environments=createEnvironments(viewer);
   let backdrop='studio';
-  try{if(ENVIRONMENTS.some(e=>e.key===localStorage.getItem('editor-vr-background')))backdrop=localStorage.getItem('editor-vr-background');}catch{/* Storage is optional. */}
+  try{if(ENVIRONMENTS.some(e=>e.key===localStorage.getItem('vr-viewer-background')))backdrop=localStorage.getItem('vr-viewer-background');}catch{/* Storage is optional. */}
   const showBackdrop=()=>environments.show(session?backdrop:'studio');
   function setBackdrop(key) {
     if(!ENVIRONMENTS.some(e=>e.key===key))return;
     backdrop=key;showBackdrop();
-    try{localStorage.setItem('editor-vr-background',key);}catch{/* Storage is optional. */}
+    try{localStorage.setItem('vr-viewer-background',key);}catch{/* Storage is optional. */}
   }
 
-  // ---------- the stage (the scene, or one part) and the mode ----------
-  // Both are shared; a change shows at once here, before the server confirms it.
+  // ---------- the stage (the scene, or one part) ----------
+  // It is shared; a change shows at once here, before the server confirms it.
   let stageOverride=null;
   const stage=()=>stageOverride&&performance.now()<stageOverride.until?stageOverride.stage:link.state?.stage||'scene';
   function setStage(next,objectId) {
@@ -83,13 +82,6 @@ export function createVR(viewer,link,tools,ctx) {
     if(!mesh?.visible)return null;
     viewer.pivot.updateMatrixWorld(true);return new THREE.Box3().setFromObject(mesh);
   }
-  const mode=()=>modeOverride&&performance.now()<modeOverride.until?modeOverride.mode:link.state?.settings.mode||'inspect';
-  function setMode(next) {
-    if(next===mode())return;
-    modeOverride={mode:next,until:performance.now()+1500};
-    release();ctx.settings({mode:next});
-    watch?.say(next==='edit'?`Annotate · ${TOOL_NAMES[link.state.settings.tool]}`:'Inspect · pinch the part to hold it, a fist turns it');
-  }
 
   // ---------- controllers and hands ----------
   const hands=[0,1].map(index=>{
@@ -101,7 +93,7 @@ export function createVR(viewer,link,tools,ctx) {
     const hand={index,controller,grip,xrHand,skin:createHandSkin(xrHand),dot,source:null,held:false,fist:false,pinch:false,mode:null,
       point:new THREE.Vector3(),rotation:new THREE.Quaternion(),tracked:false,gripStart:null,kind:null,steady:steadyPoint(),steadyTurn:steadyTurn()};
     controller.addEventListener('connected',event=>{hand.source=event.data;});
-    controller.addEventListener('disconnected',()=>{hand.source=null;hand.held=false;if(hand.mode==='paint')annotate.cancel();hand.mode=null;rebase();});
+    controller.addEventListener('disconnected',()=>{hand.source=null;hand.held=false;hand.mode=null;rebase();});
     scene.add(controller,grip,xrHand);
     return hand;
   });
@@ -221,7 +213,7 @@ export function createVR(viewer,link,tools,ctx) {
   // Let go of everything: a menu opened, the mode changed, or the model changed.
   function release() {
     const moved=hands.some(h=>MOVING.includes(h.mode));
-    hands.forEach(hand=>{if(hand.mode==='paint')annotate.cancel();hand.mode=null;hand.gripStart=null;});
+    hands.forEach(hand=>{hand.mode=null;hand.gripStart=null;});
     rebase();if(moved)publishTransform(true);
   }
 
@@ -229,34 +221,30 @@ export function createVR(viewer,link,tools,ctx) {
   function updateHand(hand,dt) {
     hand.tracked=Boolean(hand.source?.hand);
     hand.grip.visible=Boolean(hand.source)&&!hand.tracked;hand.dot.visible=Boolean(hand.source)&&!hand.tracked;
-    if(!hand.source){annotate.aim(hand,false);return;}
+    if(!hand.source){laser.aim(hand,false);return;}
     handPoint(hand,dt);
     // Tapping the watch, its menus, the keyboard, and the wrist button: fingertips only.
     const ui=watch.pointer(hand,{fingertip:fingertipOf(hand)}),kind=gesture(hand),pressed=Boolean(kind);
-    const other=hands.find(h=>h!==hand),inScene=stage()==='scene',marking=!inScene&&mode()==='edit';
-    annotate.aim(hand,(inScene||marking)&&!ui.onUI&&!watch.busy&&!MOVING.includes(hand.mode),inScene?'#6be0d4':null,inScene?ray=>watch.laser(hand,ray):null);
-    if(!inScene)hand.laserHover=null;
+    const other=hands.find(h=>h!==hand),inScene=stage()==='scene';
+    // The laser picks parts in the scene; with one part shown, it shows only on the card's ◀ Scene.
+    laser.aim(hand,!ui.onUI&&!watch.busy&&!MOVING.includes(hand.mode),ray=>watch.laser(hand,ray),!inScene);
     if(pressed&&!hand.held) {
       hand.kind=kind;
       if(ui.onUI||watch.busy)hand.mode='ui';   // a hand at the interface (or with a menu up) never grips or marks
-      else if(kind==='pinch'&&hand.panel){hand.panel.press();hand.mode='ui';}   // the laser on the part's card: Edit ▸
-      else if(MOVING.includes(other.mode)||other.mode==='paint') {
-        // A second hand joins in: the two grab together, to zoom and turn (an unfinished stroke is dropped).
-        if(other.mode==='paint')annotate.cancel();
+      else if(kind==='pinch'&&hand.panel){hand.panel.press();hand.mode='ui';}   // the laser on the part's card: View ▸
+      else if(MOVING.includes(other.mode)) {
+        // A second hand joins in: the two grab together, to zoom and turn.
         startGrip(hand);hand.mode='grab';other.mode='grab';rebase();
       } else if(kind==='fist'){startGrip(hand);hand.mode='spin';rebase();}
-      else if(marking)hand.mode=annotate.begin(hand)||'tool';
       else if(onModel(hand.point)){startGrip(hand);hand.mode='hold';rebase();}
       else if(inScene&&hand.hit?.objectId) {
         // A pinch on a part picks it when let go; moved first, it drags the scene instead.
         hand.mode='pick';hand.pick={objectId:hand.hit.objectId,from:hand.point.clone()};
       } else {startGrip(hand);hand.mode='grab';rebase();}
-    } else if(pressed&&hand.mode==='paint')annotate.move(hand);
-    else if(pressed&&hand.mode==='pick'&&hand.point.distanceTo(hand.pick.from)>PICK){startGrip(hand);hand.mode='grab';rebase();}
+    } else if(pressed&&hand.mode==='pick'&&hand.point.distanceTo(hand.pick.from)>PICK){startGrip(hand);hand.mode='grab';rebase();}
     else if(!pressed&&hand.held) {
       const was=hand.mode;hand.mode=null;hand.gripStart=null;hand.kind=null;
-      if(was==='pick'){select(hand.pick.objectId);const item=link.state.scene.objects.find(o=>o.id===hand.pick.objectId);if(item)watch.say(`${item.name} · Edit ▸ on your right wrist`);}
-      if(was==='paint')annotate.end();
+      if(was==='pick'){select(hand.pick.objectId);const item=link.state.scene.objects.find(o=>o.id===hand.pick.objectId);if(item)watch.say(`${item.name} · View ▸ on your right wrist`);}
       if(MOVING.includes(was)) {
         // Still holding with the other hand: it carries on alone, from where it is now.
         publishTransform(true);rebase();
@@ -270,22 +258,20 @@ export function createVR(viewer,link,tools,ctx) {
     if(!session||!frame)return;
     const dt=lastTime===null?0:Math.min((time-lastTime)/1000,.1);lastTime=time;
     environments.update(time);
-    commands.paused=watch.searching;   // dictation is not a command
-    if(modeOverride&&link.state?.settings.mode===modeOverride.mode)modeOverride=null;
     if(stageOverride&&link.state?.stage===stageOverride.stage)stageOverride=null;
     hands.forEach(hand=>updateHand(hand,dt));
     // A menu opened while the model was held: let go of it there.
-    if(watch.busy&&hands.some(h=>MOVING.includes(h.mode)||h.mode==='paint'))release();
+    if(watch.busy&&hands.some(h=>MOVING.includes(h.mode)))release();
     watch.update();
     if(grab){moveModel();publishTransform();}
   }
 
   // ---------- voice commands ----------
-  const annotate=createAnnotate({scene,viewer,tools,link});
+  const laser=createLaser({scene,viewer});
   const api=(url,payload)=>link.request(url,payload);
   let watch=null;
-  // With a menu open, any option on show can be said ("Pin a note", "plus", "Back"), and so can any option elsewhere
-  // in this mode's menus: the menu moves to it. What is on show wins a tie. Whisper is told which names to expect.
+  // With a menu open, any option on show can be said ("Stand", "More", "Back"), and so can any option elsewhere
+  // in this stage's menus: the menu moves to it. What is on show wins a tie. Whisper is told which names to expect.
   const commands=createCommands({api,
     vocabulary:()=>[...new Set([...watch.voiceOptions(),...COMMANDS,...watch.voiceOptions(true)].map(option=>option.label))],
     onHeard:text=>{
@@ -296,14 +282,8 @@ export function createVR(viewer,link,tools,ctx) {
       if(!command)return;
       if(command.name==='open-menu'){watch.openMenu();watch.say('🎤 Open menu');}
       else if(command.name==='open-named'){watch.say(watch.openNamed(command.menu)?`🎤 Open ${command.menu}`:`🎤 No ${command.menu} here`);}
-      else if(command.name==='tool'){if(stage()==='scene'){watch.say('🎤 Edit a part first');return;}ctx.settings({tool:command.tool,mode:'edit'});modeOverride={mode:'edit',until:performance.now()+1500};watch.say(`🎤 ${TOOL_NAMES[command.tool]}`);}
-      else if(command.name==='note'){watch.dictate();watch.say('🎤 Say the change, then tap Stop');}
-      else if(command.name==='undo'){ctx.undo();watch.say('🎤 Undo');}
-      else if(command.name==='submit'){if(stage()==='scene'){watch.say('🎤 Edit a part first');return;}watch.confirmSend();watch.say('🎤 Send to the desktop?');}
-      else if(command.name==='inspect'){if(stage()==='scene')watch.editPart();setMode('inspect');}
-      else if(command.name==='annotate'){if(stage()==='scene')watch.editPart();setMode('edit');}
-      else if(command.name==='edit-part')watch.editPart();
-      else if(command.name==='stats'){if(stage()!=='scene'){watch.say('🎤 Stats show in the scene');return;}watch.showStats(command.show??undefined);}
+      else if(command.name==='view-part'){if(stage()==='scene')watch.viewPart();else watch.say('🎤 Already on its own');}
+      else if(command.name==='stats')watch.showStats(command.show??undefined);
       else if(command.name==='unselect')watch.unselect();
       else if(command.name==='part-color'){if(!watch.openNamed('part-color'))watch.say('🎤 Pick a part first');}
       else if(command.name==='paint')watch.paint(command.color);
@@ -312,8 +292,8 @@ export function createVR(viewer,link,tools,ctx) {
       else if(command.name==='exit'){watch.say('🎤 Exit');session.end();}
     },
     onError:message=>watch?.say(`🎤 ${message}`)});
-  watch=createWatch({scene,camera:()=>camera,joint,hands,link,mode,setMode,stage,setStage,select,api,bounds:partBounds,
-    exit:()=>session?.end(),submit:()=>ctx.submit(),undo:()=>ctx.undo(),fit:()=>ctx.fit(),
+  watch=createWatch({scene,camera:()=>camera,joint,hands,link,stage,setStage,select,api,bounds:partBounds,
+    exit:()=>session?.end(),fit:()=>ctx.fit(),openFile:(path,mode)=>ctx.openFile(path,mode),
     backgrounds:{list:ENVIRONMENTS,get current(){return backdrop;},set:setBackdrop,
       get living(){return environments.living;},get running(){return environments.running;},pause:()=>environments.pause()},
     voiceCommands:{get on(){return voiceOn;},toggle(){voiceOn=!voiceOn;if(voiceOn&&session)commands.start();else commands.stop();}}});
@@ -327,7 +307,7 @@ export function createVR(viewer,link,tools,ctx) {
       session=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor','hand-tracking']});
       renderer.xr.enabled=true;renderer.xr.setReferenceSpaceType('local-floor');
       session.addEventListener('end',()=>{
-        release();watch.close();commands.stop();annotate.hideAll();
+        release();watch.close();commands.stop();laser.hideAll();
         session=null;showBackdrop();renderer.xr.enabled=false;viewer.resize();ctx.presenting(false);
         hands.forEach(hand=>{hand.held=false;hand.mode=null;});
       });
@@ -343,24 +323,24 @@ export function createVR(viewer,link,tools,ctx) {
     let supported=false;
     try{supported=await navigator.xr?.isSessionSupported('immersive-vr');}catch{/* Desktop remains available. */}
     button.disabled=!supported;
-    button.title=supported?'Enter the shared workspace in VR':'Open the HTTPS address in Quest Browser to enter VR';
+    button.title=supported?'Look at the model in VR':'Open the HTTPS address in Quest Browser to enter VR';
     button.addEventListener('click',()=>enter());
   }
 
-  instance={update,attachButton,enter,setMode,
+  instance={update,attachButton,enter,
     exit:()=>session?.end(),
     notify(message){if(session)watch.say(message);},
     // The model changed under the hands: drop what they were doing.
-    cancelInteraction(){tools.cancel();release();},
+    cancelInteraction(){release();},
     regionPoint:id=>watch.regionPoint(id),
     get watch(){return watch;},   // for the browser tests
     environments,
     get presenting(){return Boolean(session);},
     get session(){return session;},
     get hands(){return hands;},
-    get state(){return {presenting:Boolean(session),stage:stage(),selected:link.state?.selected||null,mode:mode(),background:backdrop,
+    get state(){return {presenting:Boolean(session),stage:stage(),selected:link.state?.selected||null,background:backdrop,
       backgroundShown:scene.background?.isTexture?scene.background.image?.src?.split('/').pop()||backdrop:environments.key,environment:environments.state,
-      transform:viewer.currentTransform(),watch:watch.state,lasers:annotate.state,commands:{...commands.state,on:voiceOn},
+      transform:viewer.currentTransform(),watch:watch.state,lasers:laser.state,commands:{...commands.state,on:voiceOn},
       hands:hands.map(hand=>({side:hand.source?.handedness||null,tracked:hand.tracked,model:hand.skin.ready,held:hand.held,mode:hand.mode,
         touching:Boolean(hand.poking),presses:hand.presses||0,over:hand.uiHover||null,point:hand.point.toArray(),indexTip:joint(hand,'index-finger-tip')?.position.toArray()||null}))};}};
   return instance;

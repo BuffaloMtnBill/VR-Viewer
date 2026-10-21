@@ -1,7 +1,7 @@
-"""Speech to text on this computer with Whisper (faster-whisper), for VR dictation and voice commands.
+"""Speech to text on this computer with Whisper (faster-whisper), for VR voice commands.
 
 The headset records and sends plain 16 kHz samples (no audio file to decode); they stay in memory and nothing is
-saved. The model (EDITOR_VR_WHISPER_MODEL, default small.en, about 480 MB) is downloaded once, on first use.
+saved. The model (VR_VIEWER_WHISPER_MODEL, default small.en, about 480 MB) is downloaded once, on first use.
 """
 import base64
 import binascii
@@ -14,16 +14,14 @@ import numpy as np
 RATE = 16000
 MAX_SECONDS = 30
 PROMPTS = {
-    # Dictated edit instructions and color meanings: sizes in millimeters, print vocabulary.
-    "note": "An instruction for editing a 3D print model, such as: widen this opening by 2 mm and smooth the edge.",
     # Short clips heard while VR listens for its voice commands: told what to expect, Whisper hears them reliably.
-    "command": "Open menu. Spray paint. Pin a note. Measure. Undo. Submit edit. Take a note. Exit program.",
+    "command": "Open menu. Open files. View part. Show stats. Make it blue. Back to scene. Reset view. Exit program.",
 }
 
 
 class Transcriber:
     def __init__(self, model_name=None):
-        self.model_name = model_name or os.environ.get("EDITOR_VR_WHISPER_MODEL", "small.en")
+        self.model_name = model_name or os.environ.get("VR_VIEWER_WHISPER_MODEL", "small.en")
         self._model = None
         self._lock = Lock()
 
@@ -42,23 +40,23 @@ class Transcriber:
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
             return self._model
 
-    def transcribe(self, samples, purpose="note", vocabulary=()):
+    def transcribe(self, samples, purpose="command", vocabulary=()):
         model = self._load()
         prompt = PROMPTS[purpose] + "".join(f" {word}." for word in vocabulary)
         segments, _ = model.transcribe(samples, language="en", beam_size=5, vad_filter=True, initial_prompt=prompt)
         return tidy(" ".join(segment.text.strip() for segment in segments), purpose)
 
 
-def tidy(text, purpose="note"):
-    """A note keeps its punctuation; a command loses its closing full stop."""
+def tidy(text, purpose="command"):
+    """A command loses its closing full stop."""
     text = re.sub(r"\s+", " ", text).strip()
     return text.rstrip(".").strip() if purpose == "command" else text
 
 
 def purpose_of(payload):
-    purpose = payload.get("purpose", "note") if isinstance(payload, dict) else "note"
+    purpose = payload.get("purpose", "command") if isinstance(payload, dict) else "command"
     if purpose not in PROMPTS:
-        raise ValueError("purpose is note or command.")
+        raise ValueError("purpose is command.")
     return purpose
 
 

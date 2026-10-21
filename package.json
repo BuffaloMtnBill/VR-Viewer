@@ -1,7 +1,7 @@
 {
-  "name": "editor-vr-browser-tests",
+  "name": "vr-viewer-browser-tests",
   "private": true,
-  "description": "Browser tests for Editor-VR: Playwright, and Meta's IWER emulator for the VR tests",
+  "description": "Browser tests for VR-Viewer: Playwright, and Meta's IWER emulator for the VR tests",
   "scripts": {
     "setup": "playwright-core install chromium",
     "test": "node scripts/run-browser-tests.cjs"

@@ -1,6 +1,5 @@
-"""Bounded STL/OBJ imports and portable annotated GLB exports. Coordinates are mm."""
+"""Bounded STL, OBJ and 3MF imports, as scenes of parts. Coordinates are mm."""
 import io
-import json
 import math
 import re
 import struct
@@ -352,45 +351,5 @@ def stl_bytes(vertices,faces):
     normals/=np.maximum(np.linalg.norm(normals,axis=1)[:,None],1e-12)
     records=np.zeros(len(faces),dtype=[('normal','<f4',(3,)),('vertices','<f4',(3,3)),('attribute','<u2')])
     records['normal']=normals;records['vertices']=triangles
-    return b'Editor-VR | millimeters | original geometry'.ljust(80,b'\0')+struct.pack('<I',len(faces))+records.tobytes()
+    return b'VR-Viewer | millimeters'.ljust(80,b'\0')+struct.pack('<I',len(faces))+records.tobytes()
 
-
-def annotated_glb(vertices,faces,annotations,metadata):
-    # glTF is Y-up in meters. The extras explicitly preserve native mm coordinates
-    # and face IDs; the source STL in the packet stays untransformed.
-    positions=vertices[faces].reshape(-1,3).astype('<f4')
-    positions=np.c_[positions[:,0],positions[:,2],-positions[:,1]].astype('<f4')*.001
-    colors=np.tile(np.array([.72,.76,.8,1],dtype='<f4'),(len(positions),1))
-    for annotation in annotations:
-        color=annotation['color'].lstrip('#')
-        rgb=[int(color[i:i+2],16)/255 for i in (0,2,4)]
-        for face in annotation['face_ids']: colors[face*3:face*3+3]=[*rgb,1]
-    raw=positions.tobytes()+colors.tobytes()
-    document={'asset':{'version':'2.0','generator':'Editor-VR'},'scene':0,
-              'scenes':[{'nodes':[0]}], 'nodes':[{'mesh':0,'name':metadata['name']}],
-              'meshes':[{'primitives':[{'attributes':{'POSITION':0,'COLOR_0':1},'mode':4,'material':0}],
-                         'extras':{'native_units':'mm','native_to_gltf':'[x,z,-y] / 1000','annotations':annotations,**metadata}}],
-              'materials':[{'doubleSided':True,'pbrMetallicRoughness':{'metallicFactor':0,'roughnessFactor':.7}}],
-              'buffers':[{'byteLength':len(raw)}],
-              'bufferViews':[{'buffer':0,'byteOffset':0,'byteLength':positions.nbytes,'target':34962},
-                             {'buffer':0,'byteOffset':positions.nbytes,'byteLength':colors.nbytes,'target':34962}],
-              'accessors':[{'bufferView':0,'componentType':5126,'count':len(positions),'type':'VEC3',
-                            'min':positions.min(axis=0).tolist(),'max':positions.max(axis=0).tolist()},
-                           {'bufferView':1,'componentType':5126,'count':len(colors),'type':'VEC4'}]}
-    encoded=json.dumps(document,separators=(',',':'),allow_nan=False).encode()
-    encoded+=b' '*((-len(encoded))%4);raw+=b'\0'*((-len(raw))%4)
-    return struct.pack('<4sII',b'glTF',2,12+8+len(encoded)+8+len(raw))+struct.pack('<I4s',len(encoded),b'JSON')+encoded+struct.pack('<I4s',len(raw),b'BIN\0')+raw
-
-
-def packet(vertices,faces,annotations,metadata):
-    output=io.BytesIO()
-    with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('model.stl',stl_bytes(vertices,faces))
-        archive.writestr('annotated.glb',annotated_glb(vertices,faces,annotations,metadata))
-        archive.writestr('annotations.json',json.dumps({'schema':'editor-vr.annotation-packet/1','units':'mm',
-                             'coordinate_system':'native model XYZ, normally print Z-up',**metadata,'annotations':annotations},indent=2,allow_nan=False))
-        archive.writestr('README.txt','Editor-VR edit request\n\nmodel.stl is the unchanged source geometry in millimeters.\n'
-                          'annotated.glb colors the selected faces and carries annotation metadata in mesh extras.\n'
-                          'annotations.json contains native-mm sample points, face IDs, intent colors, categories, and instructions.\n'
-                          'The desktop geometry editing pipeline is a placeholder; no mesh edits have been performed.\n')
-    return output.getvalue()

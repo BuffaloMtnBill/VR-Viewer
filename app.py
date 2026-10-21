@@ -1,4 +1,4 @@
-"""Start Editor-VR, preferring this project's virtual environment."""
+"""Start VR-Viewer from a checkout, preferring this project's virtual environment."""
 import os
 from pathlib import Path
 import subprocess
@@ -14,7 +14,7 @@ if __name__ == '__main__':
             sys.exit(subprocess.call(command))
         os.execv(command[0], command)
     try:
-        from editor_vr.__main__ import main
+        from vr_viewer.__main__ import main
     except ModuleNotFoundError as error:
         sys.exit(f"Missing package {error.name}. Run: python -m pip install -r requirements.txt")
     main()
