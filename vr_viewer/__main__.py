@@ -6,7 +6,7 @@ from threading import Thread
 import time
 import webbrowser
 from .server import create_app,read_parts
-from .lan import certificate,local_addresses
+from .lan import certificate,local_addresses,serve_https
 from .pairing import Pairing
 
 
@@ -100,6 +100,7 @@ def main():
         print('Quest: '+ ' or '.join(app.config['HEADSET_URLS'])+'\nAccept the local certificate warning, then pair with PIN: '+pairing.pin,flush=True)
     print('Data: '+str(workspace.folder)+'\nFiles: '+str(app.extensions['vr_viewer']['root'])+'\nPress Ctrl+C to stop.\n',flush=True)
     if not args.no_browser:Thread(target=open_when_ready,args=(url,args.port),daemon=True).start()
-    app.run(host=host,port=args.port,ssl_context=ssl_context,threaded=True,debug=False)
+    if ssl_context:serve_https(app,host,args.port,ssl_context)   # handshakes off the accepting thread (lan.py)
+    else:app.run(host=host,port=args.port,threaded=True,debug=False)
 
 if __name__=='__main__':main()

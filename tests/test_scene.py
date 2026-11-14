@@ -210,6 +210,15 @@ def test_the_file_browser_stays_inside_its_root(home, path):
     assert client.get('/api/workspace').json['revision'] == before
 
 
+def test_opening_a_folder_skips_files_linked_out_of_the_root(home, tmp_path):
+    """A link to an outside model, inside an allowed folder, is not read with the folder (VRV-01)."""
+    client, headers = home
+    (tmp_path / 'home' / 'Models' / 'Castle' / 'stl' / 'link.stl').symlink_to(tmp_path / 'secret.stl')
+    state = client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/stl'}).json
+    assert [o['name'] for o in state['scene']['objects']] == ['flag', 'tower']
+    assert client.post('/api/files/open', headers=headers, json={'path': 'Models/Castle/stl/link.stl'}).status_code == 400
+
+
 @pytest.mark.parametrize('path', ['..', '/etc', 'Models/../..', 'Models/outside', 'Models/missing'])
 def test_browsing_stays_inside_the_root(home, path):
     client, _ = home
@@ -238,3 +247,87 @@ def test_uploads_add_to_the_scene_or_open_a_new_one(home):
     assert [o['name'] for o in state['scene']['objects']][-2:] == ['pair 1', 'pair 2'] and len(state['scene']['objects']) == 4
     state = client.post('/api/models', headers=headers, data={'model': [(io.BytesIO(stl), 'pair.stl'), (io.BytesIO(binary_stl(cube())), 'one.stl')], 'mode': 'open'}).json
     assert state['scene']['name'] == '2 imported files' and [o['name'] for o in state['scene']['objects']] == ['pair 1', 'pair 2', 'one']
+
+
+def doubling_3mf(levels, triangle_mesh=True):
+    """A few hundred bytes of 3MF whose components each place the level below twice: 2**levels meshes."""
+    triangle = '<triangle v1="0" v2="1" v3="2"/>' if triangle_mesh else ''
+    objects = ['<object id="0" type="model"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/>'
+               f'<vertex x="0" y="1" z="0"/></vertices><triangles>{triangle}</triangles></mesh></object>']
+    for level in range(1, levels + 1):
+        objects.append(f'<object id="{level}" type="model"><components><component objectid="{level - 1}"/>'
+                       f'<component objectid="{level - 1}"/></components></object>')
+    model = ('<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter"><resources>'
+             + ''.join(objects) + f'</resources><build><item objectid="{levels}"/></build></model>')
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('3D/3dmodel.model', model)
+    return buffer.getvalue()
+
+
+def test_3mf_component_repeats_stop_at_the_part_limit():
+    """Ten doubling levels once placed 1024 meshes before the 64-part check."""
+    with pytest.raises(ValueError, match='parts'):
+        mesh._3mf_objects(doubling_3mf(10))
+    with pytest.raises(ValueError, match='too many times'):
+        mesh._3mf_objects(doubling_3mf(17, triangle_mesh=False))   # 131071 placements, none with triangles
+    assert len(mesh._3mf_objects(doubling_3mf(5))) == 32
+
+
+class ChattySocket:
+    """A page that sends instead of listening, or one past the listener limit."""
+    def __init__(self, inbound=0):
+        self.sent, self.inbound, self.closed = [], inbound, None
+
+    def send(self, data):
+        self.sent.append(json.loads(data))
+
+    def receive(self, timeout=None):
+        if self.inbound:
+            self.inbound -= 1
+            return "x"
+        return None
+
+    def close(self, reason=None, message=None):
+        self.closed = reason
+
+
+def test_hub_closes_pages_that_send_or_overflow():
+    """Pages only listen: a flood of messages closes the socket, and past MAX_LISTENERS pages are turned away."""
+    from vr_viewer import live
+    hub = live.Hub()
+    quiet = ChattySocket(inbound=live.MAX_INBOUND)        # a few stray messages are drained and forgiven
+    flood = ChattySocket(inbound=live.MAX_INBOUND + 1)
+    from threading import Thread
+    Thread(target=hub.serve, args=(quiet,), daemon=True).start()
+    hub.serve(flood)
+    assert flood.closed == 1008 and quiet.closed is None
+    for _ in range(live.MAX_LISTENERS - 1):
+        hub.queues.add(object())
+    turned_away = ChattySocket()
+    hub.serve(turned_away)
+    assert turned_away.closed == 1008 and turned_away.sent == []
+
+
+def test_heavy_work_is_admitted_a_few_at_a_time(home, monkeypatch):
+    """Past PARSE_SLOTS uploads at once, a request waits ADMIT_WAIT and then hears the computer is busy."""
+    import threading
+    from vr_viewer import server
+    client, headers = home
+    release, started, real = threading.Event(), threading.Semaphore(0), mesh.load_parts
+    def slow(*args, **kwargs):
+        started.release(); release.wait(5)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(mesh, 'load_parts', slow)
+    monkeypatch.setattr(server, 'ADMIT_WAIT', .2)
+    upload = lambda: client.post('/api/models', headers=headers, data={'model': (io.BytesIO(binary_stl(cube())), 'one.stl')})
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(upload().status_code)) for _ in range(server.PARSE_SLOTS)]
+    for thread in threads: thread.start()
+    for _ in threads: assert started.acquire(timeout=5)
+    busy = upload()
+    assert busy.status_code == 503 and 'busy' in busy.json['error']
+    release.set()
+    for thread in threads: thread.join(5)
+    assert results == [200] * server.PARSE_SLOTS
+    assert upload().status_code == 200, 'the slots are given back'

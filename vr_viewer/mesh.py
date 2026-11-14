@@ -36,6 +36,8 @@ def checked(vertices, faces):
 
 UNITS = {'mm': 1, 'cm': 10, 'm': 1000}
 MAX_PARTS = 64
+MAX_3MF_VISITS = 100_000       # component placements a 3MF may make, meshes or not
+MAX_3MF_TRIANGLES = 20_000_000  # triangles all its placed meshes may hold, before simplifying
 _3MF_UNITS = {'micron': .001, 'millimeter': 1., 'centimeter': 10., 'inch': 25.4, 'foot': 304.8, 'meter': 1000.}
 
 
@@ -198,12 +200,18 @@ def _3mf_objects(data):
             objects[element.get('id')] = (mesh, components, element.get('name'), extra)
         elif tag == 'item':
             build.append((element.get('objectid'), _transform(element.get('transform'))))
-    out = []
+    out = []; work = {'visits': 0, 'triangles': 0}
     def emit(key, matrix, name, extra, depth=0):
         if key not in objects or depth > 16: return
+        # counted as they are placed: repeated components can't multiply past the limits (CVR-01, EVR-01, VRV-02)
+        work['visits'] += 1
+        if work['visits'] > MAX_3MF_VISITS: raise ValueError('This 3MF repeats its components too many times.')
         mesh, components, own, own_extra = objects[key]
         name = own or name; extra = own_extra or extra
         if mesh is not None and len(mesh[1]):
+            work['triangles'] += len(mesh[1])
+            if len(out) >= MAX_PARTS: raise ValueError(f'Limit a file to {MAX_PARTS} parts.')
+            if work['triangles'] > MAX_3MF_TRIANGLES: raise ValueError('This 3MF places too many triangles.')
             placed = (np.c_[mesh[0], np.ones(len(mesh[0]))] @ matrix)[:, :3] * scale
             out.append((name or f'Object {key}', placed, mesh[1], extra))
         for child, child_matrix in components: emit(child, child_matrix @ matrix, name, extra, depth + 1)

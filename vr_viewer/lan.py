@@ -60,3 +60,38 @@ def certificate(folder, hosts):
     cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     hosts_path.write_text(wanted)
     return cert_path, key_path
+
+
+HANDSHAKE_SECONDS = 10   # a device's TLS handshake must finish within this
+
+
+def serve_https(app, host, port, certificate_pair):
+    """Serve the app over HTTPS like app.run(threaded=True, ssl_context=...), but with each connection's TLS handshake
+    done in its own request thread under a deadline. Werkzeug does it in the accepting thread, where one device that
+    connects and never handshakes stops every other request, pairing included (LAN-01)."""
+    from werkzeug.serving import ThreadedWSGIServer, WSGIRequestHandler, load_ssl_context
+    import ssl
+
+    class Handler(WSGIRequestHandler):
+        def handle(self):
+            try:
+                self.connection.settimeout(HANDSHAKE_SECONDS)
+                self.connection.do_handshake()
+                self.connection.settimeout(None)
+            except (ssl.SSLError, OSError):
+                return
+            super().handle()
+
+    class Server(ThreadedWSGIServer):
+        def get_request(self):
+            connection, address = self.socket.accept()
+            return self.ssl_context.wrap_socket(connection, server_side=True, do_handshake_on_connect=False), address
+
+    server = Server(host, port, app, Handler)   # a plain listening socket: nothing is wrapped while accepting
+    server.ssl_context = load_ssl_context(*certificate_pair)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

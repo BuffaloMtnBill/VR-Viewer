@@ -6,14 +6,19 @@ from pathlib import Path
 import secrets
 import struct
 import sys
-from flask import Flask,abort,jsonify,redirect,render_template,request,send_file
+from threading import BoundedSemaphore
+from flask import Flask,abort,g,jsonify,redirect,render_template,request,send_file
 from flask_sock import Sock
 from werkzeug.exceptions import HTTPException
-from .live import Hub
+from .live import MAX_MESSAGE, Hub
 from .pairing import COOKIE,is_local
 from .workspace import Workspace,Conflict
 from .speech import Transcriber,decode_samples,purpose_of,vocabulary_of
 from . import mesh
+
+PARSE_SLOTS=2     # mesh files parsed at once
+SPEECH_SLOTS=1    # recordings transcribed at once (Whisper already uses every core)
+ADMIT_WAIT=30     # seconds a request waits for a slot before it hears the computer is busy
 
 LOGGER=logging.getLogger(__name__)
 MODEL_TYPES=('.stl','.obj','.3mf')
@@ -32,13 +37,14 @@ def default_data_dir():
     return base/'vr-viewer'
 
 
-def model_files(folder):
-    """A folder's model files, by name."""
-    return sorted((p for p in folder.iterdir() if p.is_file() and not p.name.startswith('.') and p.suffix.lower() in MODEL_TYPES),
+def model_files(folder,root=None):
+    """A folder's model files, by name; with a root, only those really inside it (not linked out of it, VRV-01)."""
+    return sorted((p for p in folder.iterdir() if p.is_file() and not p.name.startswith('.') and p.suffix.lower() in MODEL_TYPES
+                   and (root is None or p.resolve().is_relative_to(root))),
                   key=lambda p:p.name.lower())
 
 
-def read_parts(paths,units='mm',split=None):
+def read_parts(paths,units='mm',split=None,root=None):
     """The parts of model files on this computer, with a scene name. One file alone is split as the Visualizer
     sees it (a 3MF's objects, an OBJ's groups, an STL's separate pieces); among several, each file is one part
     (a 3MF still gives its objects), as is a file added beside a scene (split=False). A folder stands for its model
@@ -47,7 +53,7 @@ def read_parts(paths,units='mm',split=None):
     for path in paths:
         path=Path(path).expanduser().resolve()
         if path.is_dir():
-            found=model_files(path)
+            found=model_files(path,root)
             if not found:raise ValueError(f'{path.name} has no STL, OBJ or 3MF files.')
             files+=found[:MAX_FOLDER_FILES]
         elif path.is_file() and path.suffix.lower() in MODEL_TYPES:files.append(path)
@@ -73,6 +79,7 @@ def create_app(data_dir=None,transcriber=None,root=None,start=None):
     transcriber=transcriber or Transcriber()
     browse_root=Path(root or os.environ.get('VR_VIEWER_ROOT') or Path.home()).expanduser().resolve()
     app.extensions['vr_viewer']={'workspace':workspace,'hub':hub,'token':token,'transcriber':transcriber,'root':browse_root}
+    app.config['SOCK_SERVER_OPTIONS']={'max_message_size':MAX_MESSAGE}   # pages only listen (live.py)
     sock=Sock(app)
 
     @app.before_request
@@ -86,6 +93,20 @@ def create_app(data_dir=None,transcriber=None,root=None,start=None):
             if origin and origin.rstrip('/')!=request.host_url.rstrip('/'):abort(403,description='Use the VR-Viewer page to make this request.')
         if request.method=='POST' and request.path!='/api/pair':
             if not secrets.compare_digest(request.headers.get('X-Viewer-Token',''),token):abort(403,description='Reload VR-Viewer before making changes.')
+
+    # Mesh parsing and speech are the heavy work: a few at a time, the rest wait briefly, then hear "busy" (VRV-05)
+    parsing,speaking=BoundedSemaphore(PARSE_SLOTS),BoundedSemaphore(SPEECH_SLOTS)
+    gates={'/api/models':parsing,'/api/files/open':parsing,'/api/transcribe':speaking}
+    @app.before_request
+    def admit():
+        gate=gates.get(request.path) if request.method=='POST' else None
+        if gate is None:return
+        if not gate.acquire(timeout=ADMIT_WAIT):abort(503,description='The computer is busy with other models or speech. Try again in a moment.')
+        g.admitted=gate
+    @app.teardown_request
+    def release(_error):
+        gate=g.pop('admitted',None)
+        if gate is not None:gate.release()
 
     @app.after_request
     def headers(response):
@@ -196,7 +217,7 @@ def create_app(data_dir=None,transcriber=None,root=None,start=None):
         mode=payload.get('mode','open')
         if mode not in ('open','add'):raise ValueError('Open, or add.')
         if not path.exists():raise ValueError('That file was not found.')
-        parts,name,files=read_parts([path],payload.get('units','mm'),split=False if mode=='add' else None)
+        parts,name,files=read_parts([path],payload.get('units','mm'),split=False if mode=='add' else None,root=browse_root)
         source={'kind':'files','folder':str(path if path.is_dir() else path.parent),'files':[str(f) for f in files]}
         if mode=='add':return publish(workspace.add_objects(parts,source))
         return publish(workspace.open_scene(parts,name,source))
